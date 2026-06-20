@@ -1,0 +1,5 @@
+# Copiar para config.yml (local, não versionado)
+db_path: dominios.db
+findings_dir: var/findings
+scripts_dir: scripts
+input_dir: files

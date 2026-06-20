@@ -1,0 +1,14 @@
+---
+description: Regras core do projecto goscan
+globs:
+alwaysApply: true
+---
+
+# goscan — core
+
+- Dados sensíveis em `var/`, `dominios.db`, `**/*.env` — **nunca commitar**
+- Findings unificados em `var/findings/by-domain/`
+- Scripts checker em `scripts/` com contrato `--env PATH`
+- CLI: `go run ./cmd/goscan` ou `make scan`
+- UI: `make dev-ui` (Wails3 em `src/goscan-ui`)
+- Tasks locais em `.tasks/` (não versionado)

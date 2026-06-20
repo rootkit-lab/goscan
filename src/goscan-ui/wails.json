@@ -1,0 +1,10 @@
+{
+  "$schema": "https://wails.io/schemas/config.v3.json",
+  "name": "goscan-ui",
+  "outputfilename": "goscan-ui",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "http://127.0.0.1:9280",
+  "frontend:dir": "frontend"
+}

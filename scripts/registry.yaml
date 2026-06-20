@@ -1,0 +1,135 @@
+scripts:
+  - id: chk-openai
+    path: scripts/chk-openai.py
+    label: OpenAI
+    interactive: true
+    env_keys:
+      - OPENAI_API_KEY
+      - OPENAI_KEY
+  - id: chk-gemini
+    path: scripts/chk-gemini.py
+    label: Gemini
+    interactive: true
+    env_keys:
+      - GEMINI_API_KEY
+      - GOOGLE_API_KEY
+      - GOOGLE_GENERATIVE_AI_KEY
+  - id: chk-groq
+    path: scripts/chk-groq.py
+    label: Groq
+    interactive: true
+    env_keys:
+      - GROQ_API_KEY
+  - id: chk-claud
+    path: scripts/chk-claud.py
+    label: Claude
+    interactive: true
+    env_keys:
+      - ANTHROPIC_API_KEY
+      - CLAUDE_API_KEY
+  - id: chk-smtp
+    path: scripts/chk-smtp.py
+    label: SMTP
+    interactive: true
+    env_keys:
+      - MAIL_HOST
+      - SMTP_HOST
+      - MAILER_HOST
+      - EMAIL_HOST
+      - MAIL_USERNAME
+      - SMTP_USERNAME
+      - MAIL_PASSWORD
+      - SMTP_PASSWORD
+  - id: chk-mysql
+    path: scripts/chk-mysql.py
+    label: MySQL
+    interactive: true
+    env_keys:
+      - DB_HOST
+      - DB_USERNAME
+      - DB_PASSWORD
+      - DB_DATABASE
+  - id: chk-postgres
+    path: scripts/chk-postgres.py
+    label: PostgreSQL
+    interactive: true
+    env_keys:
+      - DATABASE_URL
+      - DB_HOST
+      - DB_USERNAME
+      - DB_PASSWORD
+  - id: chk-redis
+    path: scripts/chk-redis.py
+    label: Redis
+    interactive: true
+    env_keys:
+      - REDIS_HOST
+      - REDIS_URL
+      - REDIS_PASSWORD
+  - id: chk-aws
+    path: scripts/chk-aws.py
+    label: AWS
+    interactive: true
+    env_keys:
+      - AWS_ACCESS_KEY_ID
+      - AWS_SECRET_ACCESS_KEY
+  - id: chk-pusher
+    path: scripts/chk-pusher.py
+    label: Pusher
+    interactive: true
+    env_keys:
+      - PUSHER_APP_ID
+      - PUSHER_APP_KEY
+      - PUSHER_APP_SECRET
+  - id: chk-stripe
+    path: scripts/chk-stripe.py
+    label: Stripe
+    interactive: true
+    env_keys:
+      - STRIPE_SECRET
+      - STRIPE_SECRET_KEY
+  - id: chk-paypal
+    path: scripts/chk-paypal.py
+    label: PayPal
+    interactive: true
+    env_keys:
+      - PAYPAL_CLIENT_ID
+      - PAYPAL_CLIENT_SECRET
+      - PAYPAL_SECRET
+  - id: chk-sendgrid
+    path: scripts/chk-sendgrid.py
+    label: SendGrid
+    interactive: true
+    env_keys:
+      - SENDGRID_API_KEY
+  - id: chk-twilio
+    path: scripts/chk-twilio.py
+    label: Twilio
+    interactive: true
+    env_keys:
+      - TWILIO_SID
+      - TWILIO_AUTH_TOKEN
+  - id: chk-supabase
+    path: scripts/chk-supabase.py
+    label: Supabase
+    interactive: true
+    env_keys:
+      - SUPABASE_URL
+      - VITE_SUPABASE_URL
+      - SUPABASE_SERVICE_KEY
+      - VITE_SUPABASE_ANON_KEY
+  - id: chk-mailgun
+    path: scripts/chk-mailgun.py
+    label: Mailgun
+    interactive: true
+    env_keys:
+      - MAILGUN_DOMAIN
+      - MAILGUN_SECRET
+  - id: chk-razorpay
+    path: scripts/chk-razorpay.py
+    label: Razorpay
+    interactive: true
+    env_keys:
+      - RAZORPAY_KEY_ID
+      - RAZORPAY_KEY
+      - RAZORPAY_KEY_SECRET

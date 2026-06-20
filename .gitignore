@@ -1,0 +1,53 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.cursor/debug-*.log
+.cursor/hooks/state/
+
+# Python
+__pycache__/
+*.py[cod]
+scripts/.venv/
+0_scripts/
+
+# Logs / temp
+*.log
+*.tmp
+tmp/
+temp/
+.tasks/
+
+# Secrets / local env
+.env
+.env.*
+*.local
+config.yml
+.cursor/dev-credentials.env
+
+# Data (sensitive / large)
+var/
+scan_resultados_*/
+dominios.db
+dominios.db-*
+test_dominios.db
+files/dominios_unicos.txt
+**/*.env
+
+# Go build
+/bin/
+/out/
+
+# Node / frontend
+node_modules/
+**/frontend/dist/
+**/frontend/node_modules/
+.vite/
+**/.vite/
+*.tsbuildinfo
+frontend/wailsjs/runtime/
+wailsjs/runtime/
+
+# Wails
+**/build/bin/

@@ -1,0 +1,23 @@
+:root {
+  --vscode-bg: #1e1e1e;
+  --vscode-sidebar: #252526;
+  --vscode-panel: #1e1e1e;
+  --vscode-input: #3c3c3c;
+  --vscode-border: #3c3c3c;
+  --vscode-fg: #cccccc;
+  --vscode-fg-muted: #858585;
+  --vscode-fg-dim: #6e6e6e;
+  --vscode-accent: #007acc;
+  --vscode-accent-hover: #1a8ad4;
+  --vscode-selection: #37373d;
+  --vscode-hover: #2a2d2e;
+  --vscode-list-active: #37373d;
+  --vscode-tab-active: #1e1e1e;
+  --vscode-tab-inactive: #2d2d2d;
+  --vscode-statusbar: #007acc;
+  --vscode-statusbar-fg: #ffffff;
+  --vscode-error: #f48771;
+  --vscode-warning: #cca700;
+  --vscode-font-size: 13px;
+  --vscode-font-mono: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
+}

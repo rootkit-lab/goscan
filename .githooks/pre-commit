@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+blocked='(dominios\.db|\.env$|var/findings/)'
+if git diff --cached --name-only | grep -E "$blocked" >/dev/null 2>&1; then
+  echo "Erro: ficheiros sensíveis no staging (db/env/findings)."
+  git diff --cached --name-only | grep -E "$blocked" || true
+  exit 1
+fi
+
+if git diff --cached --name-only | grep -E '^\.tasks/' >/dev/null 2>&1; then
+  echo "Erro: .tasks/ não deve ser versionado."
+  exit 1
+fi
