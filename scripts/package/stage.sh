@@ -19,11 +19,19 @@ mkdir -p "$DEST/bin" "$DEST/scripts"
 
 install -m 755 "$ROOT/bin/goscan" "$ROOT/bin/goscan-ui" "$ROOT/bin/goscan-remote" "$DEST/bin/"
 
-rsync -a --delete \
-  --exclude '.venv' \
-  --exclude '__pycache__' \
-  --exclude '*.pyc' \
-  "$ROOT/scripts/" "$DEST/scripts/"
+if command -v rsync >/dev/null 2>&1; then
+  rsync -a --delete \
+    --exclude '.venv' \
+    --exclude '__pycache__' \
+    --exclude '*.pyc' \
+    "$ROOT/scripts/" "$DEST/scripts/"
+else
+  rm -rf "$DEST/scripts"
+  mkdir -p "$DEST/scripts"
+  cp -R "$ROOT/scripts/." "$DEST/scripts/"
+  rm -rf "$DEST/scripts/.venv" "$DEST/scripts/__pycache__"
+  find "$DEST/scripts" -name '*.pyc' -delete 2>/dev/null || true
+fi
 
 if [ -f "$ROOT/assets/VERSION" ]; then
   install -m 644 "$ROOT/assets/VERSION" "$DEST/VERSION"

@@ -119,6 +119,7 @@ jobs:
   github-release:
     name: GitHub Release
     needs: [build-deb, build-msi]
+    if: ${{ needs.build-deb.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -152,7 +153,7 @@ jobs:
           name: GoScan ${{ steps.ver.outputs.version }}
           generate_release_notes: true
           files: |
-            dist/goscan_${{ steps.ver.outputs.version }}_amd64.deb
-            dist/goscan_${{ steps.ver.outputs.version }}_amd64.msi
+            dist/goscan_*_amd64.deb
+            dist/goscan_*_amd64.msi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
