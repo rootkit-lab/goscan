@@ -9,13 +9,23 @@ from pathlib import Path
 import requests
 
 from envutil import (
+    DEFAULT_HTTP_TIMEOUT,
+    DEFAULT_OPERATION_TIMEOUT,
+    GOSCAN_TEST_EMAIL,
     env_arg_parser,
+    finding_domain,
+    format_network_error,
+    is_batch_mode,
     is_interactive,
     load_env_keys,
+    log_step,
     main_missing,
     pick_key,
+    print_summary,
     prompt_multiline,
     prompt_required,
+    random_email_content,
+    run_with_timeout,
 )
 
 
@@ -30,7 +40,7 @@ def validate_key(api_key: str) -> tuple[bool, str]:
     r = requests.get(
         "https://api.sendgrid.com/v3/user/profile",
         headers={"Authorization": f"Bearer {api_key}"},
-        timeout=30,
+        timeout=DEFAULT_HTTP_TIMEOUT,
     )
     if r.status_code == 401:
         return False, "Chave inválida (401)"
@@ -51,7 +61,7 @@ def send_mail(api_key: str, from_addr: str, to_addr: str, subject: str, body: st
         "https://api.sendgrid.com/v3/mail/send",
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
         json=payload,
-        timeout=30,
+        timeout=DEFAULT_HTTP_TIMEOUT,
     )
     if r.status_code not in (200, 202):
         raise RuntimeError(f"HTTP {r.status_code}: {r.text[:300]}")
@@ -59,38 +69,78 @@ def send_mail(api_key: str, from_addr: str, to_addr: str, subject: str, body: st
 
 def run_interactive(env: dict[str, str]) -> int:
     api_key = sendgrid_key(env)
-    ok, msg = validate_key(api_key)
-    if not ok:
-        print(msg)
+    log_step("A validar chave SendGrid…")
+    try:
+        ok, msg = run_with_timeout(lambda: validate_key(api_key), DEFAULT_OPERATION_TIMEOUT, "SendGrid")
+    except Exception as exc:
+        print(format_network_error(exc), flush=True)
         return 1
-    print(f"SendGrid OK — {msg}")
+    if not ok:
+        print(msg, flush=True)
+        return 1
+    print(f"SendGrid OK — {msg}", flush=True)
 
     from_addr = pick_key(env, ["MAIL_FROM_ADDRESS", "MAIL_FROM", "SENDGRID_FROM"])
     if not from_addr:
         from_addr = prompt_required("Remetente (email)")
-    print("\nPreencha o email de teste:")
+    print("\nPreencha o email de teste:", flush=True)
     to_addr = prompt_required("Destinatário")
     subject = prompt_required("Assunto")
     body = prompt_multiline("Mensagem")
 
+    log_step("A enviar email…")
     try:
-        send_mail(api_key, from_addr, to_addr, subject, body)
+        run_with_timeout(
+            lambda: send_mail(api_key, from_addr, to_addr, subject, body),
+            DEFAULT_OPERATION_TIMEOUT,
+            "Envio SendGrid",
+        )
     except Exception as exc:
-        print(f"Falha ao enviar: {exc}")
+        print(format_network_error(exc), flush=True)
         return 1
 
-    print(f"OK — email enviado para {to_addr}")
+    print(f"OK — email enviado para {to_addr}", flush=True)
+    return 0
+
+
+def run_batch(env: dict[str, str], env_path: Path) -> int:
+    api_key = sendgrid_key(env)
+    from_addr = pick_key(env, ["MAIL_FROM_ADDRESS", "MAIL_FROM", "SENDGRID_FROM"]) or "noreply@goscan.local"
+    domain = finding_domain(env_path) or env_path.stem
+    to_addr = GOSCAN_TEST_EMAIL
+    subject, body = random_email_content(domain)
+    log_step(f"Batch SendGrid → {to_addr}")
+    try:
+        run_with_timeout(
+            lambda: send_mail(api_key, from_addr, to_addr, subject, body),
+            DEFAULT_OPERATION_TIMEOUT,
+            "SendGrid",
+        )
+    except Exception as exc:
+        print(format_network_error(exc), flush=True)
+        return 1
+    print_summary(f"email → {GOSCAN_TEST_EMAIL}")
     return 0
 
 
 def main() -> None:
     args = env_arg_parser("SendGrid checker").parse_args()
     env = load_env_keys(Path(args.env))
+    if is_batch_mode(args):
+        sys.exit(run_batch(env, Path(args.env)))
     if is_interactive():
         sys.exit(run_interactive(env))
-    ok, msg = validate_key(sendgrid_key(env))
-    print(msg)
-    sys.exit(0 if ok else 1)
+    try:
+        ok, msg = run_with_timeout(
+            lambda: validate_key(sendgrid_key(env)),
+            DEFAULT_OPERATION_TIMEOUT,
+            "SendGrid",
+        )
+        print(msg, flush=True)
+        sys.exit(0 if ok else 1)
+    except Exception as exc:
+        print(format_network_error(exc), flush=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

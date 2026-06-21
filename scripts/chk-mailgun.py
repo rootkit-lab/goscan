@@ -9,13 +9,23 @@ from pathlib import Path
 import requests
 
 from envutil import (
+    DEFAULT_HTTP_TIMEOUT,
+    DEFAULT_OPERATION_TIMEOUT,
+    GOSCAN_TEST_EMAIL,
     env_arg_parser,
+    finding_domain,
+    format_network_error,
+    is_batch_mode,
     is_interactive,
     load_env_keys,
+    log_step,
     main_missing,
     pick_key,
+    print_summary,
     prompt_multiline,
     prompt_required,
+    random_email_content,
+    run_with_timeout,
 )
 
 
@@ -29,7 +39,7 @@ def mailgun_config(env: dict[str, str]) -> tuple[str, str, str]:
 
 
 def validate(domain: str, api_key: str, base: str) -> tuple[bool, str]:
-    r = requests.get(f"{base}/domains/{domain}", auth=("api", api_key), timeout=30)
+    r = requests.get(f"{base}/domains/{domain}", auth=("api", api_key), timeout=DEFAULT_HTTP_TIMEOUT)
     if r.status_code == 401:
         return False, "API key inválida (401)"
     if r.status_code == 404:
@@ -45,7 +55,7 @@ def send_mail(domain: str, api_key: str, base: str, from_addr: str, to_addr: str
         f"{base}/{domain}/messages",
         auth=("api", api_key),
         data={"from": from_addr, "to": to_addr, "subject": subject, "text": body},
-        timeout=30,
+        timeout=DEFAULT_HTTP_TIMEOUT,
     )
     if r.status_code not in (200, 201):
         raise RuntimeError(f"HTTP {r.status_code}: {r.text[:300]}")
@@ -53,36 +63,76 @@ def send_mail(domain: str, api_key: str, base: str, from_addr: str, to_addr: str
 
 def run_interactive(env: dict[str, str]) -> int:
     domain, api_key, base = mailgun_config(env)
-    ok, msg = validate(domain, api_key, base)
-    if not ok:
-        print(msg)
+    log_step("A validar domínio Mailgun…")
+    try:
+        ok, msg = run_with_timeout(lambda: validate(domain, api_key, base), DEFAULT_OPERATION_TIMEOUT, "Mailgun")
+    except Exception as exc:
+        print(format_network_error(exc), flush=True)
         return 1
-    print(f"Mailgun OK — {msg} ({domain})")
+    if not ok:
+        print(msg, flush=True)
+        return 1
+    print(f"Mailgun OK — {msg} ({domain})", flush=True)
 
     from_addr = pick_key(env, ["MAIL_FROM_ADDRESS", "MAILGUN_FROM", "MAIL_FROM"]) or prompt_required("Remetente")
-    print("\nPreencha o email de teste:")
+    print("\nPreencha o email de teste:", flush=True)
     to_addr = prompt_required("Destinatário")
     subject = prompt_required("Assunto")
     body = prompt_multiline("Mensagem")
 
+    log_step("A enviar email…")
     try:
-        send_mail(domain, api_key, base, from_addr, to_addr, subject, body)
+        run_with_timeout(
+            lambda: send_mail(domain, api_key, base, from_addr, to_addr, subject, body),
+            DEFAULT_OPERATION_TIMEOUT,
+            "Envio Mailgun",
+        )
     except Exception as exc:
-        print(f"Falha ao enviar: {exc}")
+        print(format_network_error(exc), flush=True)
         return 1
 
-    print(f"OK — email enviado para {to_addr}")
+    print(f"OK — email enviado para {to_addr}", flush=True)
+    return 0
+
+
+def run_batch(env: dict[str, str], env_path: Path) -> int:
+    domain_cfg, api_key, base = mailgun_config(env)
+    from_addr = pick_key(env, ["MAIL_FROM_ADDRESS", "MAILGUN_FROM", "MAIL_FROM"]) or f"goscan@{domain_cfg}"
+    dom = finding_domain(env_path) or env_path.stem
+    to_addr = GOSCAN_TEST_EMAIL
+    subject, body = random_email_content(dom)
+    log_step(f"Batch Mailgun → {to_addr}")
+    try:
+        run_with_timeout(
+            lambda: send_mail(domain_cfg, api_key, base, from_addr, to_addr, subject, body),
+            DEFAULT_OPERATION_TIMEOUT,
+            "Mailgun",
+        )
+    except Exception as exc:
+        print(format_network_error(exc), flush=True)
+        return 1
+    print_summary(f"email → {GOSCAN_TEST_EMAIL}")
     return 0
 
 
 def main() -> None:
     args = env_arg_parser("Mailgun checker").parse_args()
     env = load_env_keys(Path(args.env))
+    if is_batch_mode(args):
+        sys.exit(run_batch(env, Path(args.env)))
     if is_interactive():
         sys.exit(run_interactive(env))
-    ok, msg = validate(*mailgun_config(env))
-    print(msg)
-    sys.exit(0 if ok else 1)
+    try:
+        ok, msg = run_with_timeout(
+            lambda: validate(*mailgun_config(env)),
+            DEFAULT_OPERATION_TIMEOUT,
+            "Mailgun",
+        )
+        print(msg, flush=True)
+        sys.exit(0 if ok else 1)
+    except Exception as exc:
+        print(format_network_error(exc), flush=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

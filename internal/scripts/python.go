@@ -44,6 +44,12 @@ func ScriptEnv(repoRoot string) []string {
 	return env
 }
 
+// BatchScriptEnv adds GOSCAN_BATCH for batch checkers.
+func BatchScriptEnv(repoRoot string) []string {
+	env := ScriptEnv(repoRoot)
+	return append(env, "GOSCAN_BATCH=1")
+}
+
 func prependPath(env []string, key, prefix string) []string {
 	out := make([]string, 0, len(env)+1)
 	replaced := false

@@ -3,7 +3,6 @@ package scripts
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -81,15 +80,14 @@ func (r *Runner) RunInteractive(ctx context.Context, scriptID, envPath string, e
 				emit("terminal:data", string(buf[:n]))
 			}
 			if readErr != nil {
-				if readErr != io.EOF {
-					break
-				}
 				break
 			}
 		}
 	}()
 
 	waitErr := cmd.Wait()
+	_ = ptmx.Close()
+
 	exitCode := 0
 	if cmd.ProcessState != nil {
 		exitCode = cmd.ProcessState.ExitCode()

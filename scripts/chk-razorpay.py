@@ -8,7 +8,18 @@ from pathlib import Path
 
 import requests
 
-from envutil import env_arg_parser, is_interactive, load_env_keys, main_missing, pick_key
+from envutil import (
+    DEFAULT_HTTP_TIMEOUT,
+    DEFAULT_OPERATION_TIMEOUT,
+    env_arg_parser,
+    format_network_error,
+    is_interactive,
+    load_env_keys,
+    log_step,
+    main_missing,
+    pick_key,
+    run_with_timeout,
+)
 
 
 def razorpay_config(env: dict[str, str]) -> tuple[str, str]:
@@ -24,7 +35,7 @@ def validate(key_id: str, secret: str) -> tuple[bool, str]:
         "https://api.razorpay.com/v1/payments",
         params={"count": 1},
         auth=(key_id, secret),
-        timeout=30,
+        timeout=DEFAULT_HTTP_TIMEOUT,
     )
     if r.status_code == 401:
         return False, "Credenciais inválidas (401)"
@@ -36,9 +47,18 @@ def validate(key_id: str, secret: str) -> tuple[bool, str]:
 
 def run_interactive(env: dict[str, str]) -> int:
     key_id, secret = razorpay_config(env)
-    print(f"Razorpay — key …{key_id[-6:]}")
-    ok, msg = validate(key_id, secret)
-    print(msg)
+    print(f"Razorpay — key …{key_id[-6:]}", flush=True)
+    log_step("A validar credenciais…")
+    try:
+        ok, msg = run_with_timeout(
+            lambda: validate(key_id, secret),
+            DEFAULT_OPERATION_TIMEOUT,
+            "Razorpay",
+        )
+    except Exception as exc:
+        print(format_network_error(exc), flush=True)
+        return 1
+    print(msg, flush=True)
     return 0 if ok else 1
 
 
@@ -47,9 +67,17 @@ def main() -> None:
     env = load_env_keys(Path(args.env))
     if is_interactive():
         sys.exit(run_interactive(env))
-    ok, msg = validate(*razorpay_config(env))
-    print(msg)
-    sys.exit(0 if ok else 1)
+    try:
+        ok, msg = run_with_timeout(
+            lambda: validate(*razorpay_config(env)),
+            DEFAULT_OPERATION_TIMEOUT,
+            "Razorpay",
+        )
+        print(msg, flush=True)
+        sys.exit(0 if ok else 1)
+    except Exception as exc:
+        print(format_network_error(exc), flush=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -1,8 +1,10 @@
-import { Copy, Trash2 } from "lucide-react";
+import { Copy, FolderOpen, Trash2 } from "lucide-react";
 import type { RefObject } from "react";
 import { useEffect, useRef } from "react";
 import { clsx } from "clsx";
+import { BatchProgressBar } from "@/components/batch/BatchProgressBar";
 import { ResizablePanel } from "@/components/layout/ResizablePanel";
+import type { BatchProgressDTO } from "@/lib/api";
 
 export type BottomTab = "output" | "terminal";
 
@@ -14,6 +16,10 @@ type Props = {
   termRef: RefObject<HTMLDivElement | null>;
   onClearTerminal: () => void;
   terminalActive: boolean;
+  batchRunning?: boolean;
+  batchProgress?: BatchProgressDTO | null;
+  batchLogDir?: string;
+  onOpenBatchLogs?: () => void;
 };
 
 export function BottomPanel({
@@ -23,7 +29,11 @@ export function BottomPanel({
   onClearOutput,
   termRef,
   onClearTerminal,
-  terminalActive
+  terminalActive,
+  batchRunning,
+  batchProgress,
+  batchLogDir,
+  onOpenBatchLogs
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -54,6 +64,17 @@ export function BottomPanel({
         <span className="flex w-full items-center justify-between gap-2">
           <TabBar tab={tab} onTabChange={onTabChange} terminalActive={terminalActive} />
           <span className="flex shrink-0 gap-1">
+            {batchLogDir && onOpenBatchLogs ? (
+              <button
+                type="button"
+                className="flex items-center gap-1 px-1 text-[10px] text-vscode-muted hover:bg-vscode-hover hover:text-vscode-fg"
+                onClick={onOpenBatchLogs}
+                title={batchLogDir}
+              >
+                <FolderOpen className="h-3 w-3" />
+                Logs
+              </button>
+            ) : null}
             <button type="button" className="p-0.5 hover:bg-vscode-hover" onClick={clearContent} title="Limpar">
               <Trash2 className="h-3 w-3" />
             </button>
@@ -64,11 +85,12 @@ export function BottomPanel({
         </span>
       }
     >
-      <div className="relative h-full">
+      <div className="relative flex h-full flex-col">
+        <BatchProgressBar progress={batchProgress ?? null} running={!!batchRunning && tab === "output"} />
         <div
           ref={scrollRef}
           className={clsx(
-            "h-full overflow-auto font-mono text-[12px] leading-relaxed text-vscode-fg",
+            "min-h-0 flex-1 overflow-auto font-mono text-[12px] leading-relaxed text-vscode-fg",
             tab !== "output" && "hidden"
           )}
         >
@@ -84,7 +106,7 @@ export function BottomPanel({
         </div>
         <div
           ref={termRef as React.RefObject<HTMLDivElement>}
-          className={clsx("h-full w-full", tab !== "terminal" && "hidden")}
+          className={clsx("min-h-0 flex-1 w-full", tab !== "terminal" && "hidden")}
         />
       </div>
     </ResizablePanel>

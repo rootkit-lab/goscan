@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"database/sql"
 	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -27,6 +28,9 @@ type DomainStore struct {
 }
 
 func OpenDomainStore(path string) (*DomainStore, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return nil, err
+	}
 	db, err := sql.Open("sqlite", path+"?_journal_mode=WAL&_busy_timeout=5000&_synchronous=NORMAL")
 	if err != nil {
 		return nil, err

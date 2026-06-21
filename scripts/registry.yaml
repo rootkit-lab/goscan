@@ -27,6 +27,65 @@ scripts:
     env_keys:
       - ANTHROPIC_API_KEY
       - CLAUDE_API_KEY
+  - id: chk-xai
+    path: scripts/chk-xai.py
+    label: xAI
+    interactive: true
+    env_keys:
+      - XAI_API_KEY
+      - GROK_API_KEY
+  - id: chk-mistral
+    path: scripts/chk-mistral.py
+    label: Mistral
+    interactive: true
+    env_keys:
+      - MISTRAL_API_KEY
+  - id: chk-deepseek
+    path: scripts/chk-deepseek.py
+    label: DeepSeek
+    interactive: true
+    env_keys:
+      - DEEPSEEK_API_KEY
+  - id: chk-perplexity
+    path: scripts/chk-perplexity.py
+    label: Perplexity
+    interactive: true
+    env_keys:
+      - PERPLEXITY_API_KEY
+      - PPLX_API_KEY
+  - id: chk-openrouter
+    path: scripts/chk-openrouter.py
+    label: OpenRouter
+    interactive: true
+    env_keys:
+      - OPENROUTER_API_KEY
+  - id: chk-together
+    path: scripts/chk-together.py
+    label: Together
+    interactive: true
+    env_keys:
+      - TOGETHER_API_KEY
+      - TOGETHERAI_API_KEY
+  - id: chk-cohere
+    path: scripts/chk-cohere.py
+    label: Cohere
+    interactive: true
+    env_keys:
+      - COHERE_API_KEY
+  - id: chk-replicate
+    path: scripts/chk-replicate.py
+    label: Replicate
+    interactive: true
+    env_keys:
+      - REPLICATE_API_TOKEN
+      - REPLICATE_API_KEY
+  - id: chk-huggingface
+    path: scripts/chk-huggingface.py
+    label: HuggingFace
+    interactive: true
+    env_keys:
+      - HF_TOKEN
+      - HUGGINGFACE_API_KEY
   - id: chk-smtp
     path: scripts/chk-smtp.py
     label: SMTP
@@ -66,6 +125,35 @@ scripts:
       - REDIS_HOST
       - REDIS_URL
       - REDIS_PASSWORD
+  - id: chk-mongodb
+    path: scripts/chk-mongodb.py
+    label: MongoDB
+    interactive: true
+    env_keys:
+      - MONGODB_URI
+      - MONGO_URI
+      - MONGO_URL
+  - id: chk-memcached
+    path: scripts/chk-memcached.py
+    label: Memcached
+    interactive: true
+    env_keys:
+      - MEMCACHED_HOST
+      - MEMCACHE_SERVER
+  - id: chk-paystack
+    path: scripts/chk-paystack.py
+    label: Paystack
+    interactive: true
+    env_keys:
+      - PAYSTACK_SECRET_KEY
+      - PAYSTACK_SECRET
+  - id: chk-sentry
+    path: scripts/chk-sentry.py
+    label: Sentry
+    interactive: true
+    env_keys:
+      - SENTRY_LARAVEL_DSN
+      - SENTRY_DSN
   - id: chk-aws
     path: scripts/chk-aws.py
     label: AWS
@@ -133,3 +221,64 @@ scripts:
       - RAZORPAY_KEY_ID
       - RAZORPAY_KEY
       - RAZORPAY_KEY_SECRET
+  - id: chk-nexmo
+    path: scripts/chk-nexmo.py
+    label: Nexmo
+    interactive: true
+    env_keys:
+      - NEXMO_KEY
+      - NEXMO_SECRET
+      - VONAGE_API_KEY
+  - id: chk-firebase
+    path: scripts/chk-firebase.py
+    label: Firebase
+    interactive: true
+    env_keys:
+      - FIREBASE_API_KEY
+      - VITE_FIREBASE_API_KEY
+      - REACT_APP_FIREBASE_API_KEY
+  - id: chk-paddle
+    path: scripts/chk-paddle.py
+    label: Paddle
+    interactive: true
+    env_keys:
+      - PADDLE_API_KEY
+      - PADDLE_AUTH_CODE
+      - PADDLE_VENDOR_ID
+  - id: chk-flutterwave
+    path: scripts/chk-flutterwave.py
+    label: Flutterwave
+    interactive: true
+    env_keys:
+      - FLW_SECRET_KEY
+      - FLW_SECRET
+  - id: chk-hubspot
+    path: scripts/chk-hubspot.py
+    label: HubSpot
+    interactive: true
+    env_keys:
+      - HUB_SPOT_API_KEY
+      - HUBSPOT_APIKEY
+      - HUBSPOT_ACCESS_TOKEN
+  - id: chk-fcm
+    path: scripts/chk-fcm.py
+    label: FCM
+    interactive: true
+    env_keys:
+      - FCM_SERVER_KEY
+      - FIREBASE_SERVER_KEY
+  - id: chk-telegram
+    path: scripts/chk-telegram.py
+    label: Telegram
+    interactive: true
+    env_keys:
+      - TELEGRAM_API_TOKEN
+      - TELEGRAM_BOT_TOKEN
+  - id: chk-shopify
+    path: scripts/chk-shopify.py
+    label: Shopify
+    interactive: true
+    env_keys:
+      - SHOPIFY_ACCESS_TOKEN
+      - SHOPIFY_STORE_URL
+      - SHOPIFY_SHOP

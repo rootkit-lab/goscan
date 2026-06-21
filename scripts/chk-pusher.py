@@ -9,7 +9,19 @@ from pathlib import Path
 
 import pusher
 
-from envutil import env_arg_parser, is_interactive, load_env_keys, main_missing, pick_key, prompt_optional, prompt_required
+from envutil import (
+    DEFAULT_OPERATION_TIMEOUT,
+    env_arg_parser,
+    format_network_error,
+    is_interactive,
+    load_env_keys,
+    log_step,
+    main_missing,
+    pick_key,
+    prompt_optional,
+    prompt_required,
+    run_with_timeout,
+)
 
 
 def pusher_config(env: dict[str, str]) -> dict[str, str]:
@@ -33,26 +45,28 @@ def make_client(cfg: dict[str, str]) -> pusher.Pusher:
 
 
 def validate_client(cfg: dict[str, str]) -> tuple[bool, str]:
-    try:
-        info = make_client(cfg).channels_info()
-        channels = info.get("channels") or {}
-        return True, f"API OK — {len(channels)} canal(is) activo(s)"
-    except Exception as exc:
-        return False, str(exc)
+    info = make_client(cfg).channels_info()
+    channels = info.get("channels") or {}
+    return True, f"API OK — {len(channels)} canal(is) activo(s)"
 
 
 def run_interactive(env: dict[str, str]) -> int:
     cfg = pusher_config(env)
-    print("Pusher detectado:")
-    print(f"  App ID:  {cfg['app_id']}")
-    print(f"  Key:     {cfg['key']}")
-    print(f"  Cluster: {cfg['cluster']}")
+    print("Pusher detectado:", flush=True)
+    print(f"  App ID:  {cfg['app_id']}", flush=True)
+    print(f"  Key:     {cfg['key']}", flush=True)
+    print(f"  Cluster: {cfg['cluster']}", flush=True)
 
-    ok, msg = validate_client(cfg)
-    if not ok:
-        print(msg)
+    log_step("A validar credenciais Pusher…")
+    try:
+        ok, msg = run_with_timeout(lambda: validate_client(cfg), DEFAULT_OPERATION_TIMEOUT, "Pusher")
+    except Exception as exc:
+        print(format_network_error(exc), flush=True)
         return 1
-    print("Credenciais válidas.")
+    if not ok:
+        print(msg, flush=True)
+        return 1
+    print("Credenciais válidas.", flush=True)
 
     trigger = prompt_optional("Disparar evento de teste? (s/N)", "n").lower()
     if trigger not in ("s", "sim", "y", "yes"):
@@ -64,15 +78,20 @@ def run_interactive(env: dict[str, str]) -> int:
     try:
         payload = json.loads(data_raw)
     except json.JSONDecodeError as exc:
-        print(f"JSON inválido: {exc}")
+        print(f"JSON inválido: {exc}", flush=True)
         return 1
 
     client = make_client(cfg)
+    log_step("A disparar evento…")
     try:
-        client.trigger(channel, event, payload)
-        print(f"OK — evento '{event}' enviado em '{channel}'")
+        run_with_timeout(
+            lambda: client.trigger(channel, event, payload),
+            DEFAULT_OPERATION_TIMEOUT,
+            "Pusher trigger",
+        )
+        print(f"OK — evento '{event}' enviado em '{channel}'", flush=True)
     except Exception as exc:
-        print(f"Falha ao disparar: {exc}")
+        print(format_network_error(exc), flush=True)
         return 1
     return 0
 
@@ -82,9 +101,17 @@ def main() -> None:
     env = load_env_keys(Path(args.env))
     if is_interactive():
         sys.exit(run_interactive(env))
-    ok, msg = validate_client(pusher_config(env))
-    print(msg)
-    sys.exit(0 if ok else 1)
+    try:
+        ok, msg = run_with_timeout(
+            lambda: validate_client(pusher_config(env)),
+            DEFAULT_OPERATION_TIMEOUT,
+            "Pusher",
+        )
+        print(msg, flush=True)
+        sys.exit(0 if ok else 1)
+    except Exception as exc:
+        print(format_network_error(exc), flush=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

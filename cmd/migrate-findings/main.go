@@ -11,15 +11,20 @@ import (
 )
 
 func main() {
-	root, err := paths.RepoRoot()
+	appRoot, err := paths.AppRoot()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "repo root: %v\n", err)
+		fmt.Fprintf(os.Stderr, "app root: %v\n", err)
+		os.Exit(1)
+	}
+	dataRoot, err := paths.DataRoot()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "data root: %v\n", err)
 		os.Exit(1)
 	}
 
-	dbPath := paths.DefaultDBPath(root)
-	findingsDir := paths.FindingsRoot(root)
-	archiveDir := paths.ArchiveDir(root)
+	dbPath := paths.DefaultDBPath(dataRoot)
+	findingsDir := paths.FindingsRoot(dataRoot)
+	archiveDir := paths.ArchiveDir(dataRoot)
 
 	domainStore, err := store.OpenDomainStore(dbPath)
 	if err != nil {
@@ -35,7 +40,7 @@ func main() {
 	}
 
 	var moved, dupes, errors int
-	matches, _ := filepath.Glob(filepath.Join(root, "scan_resultados_*"))
+	matches, _ := filepath.Glob(filepath.Join(appRoot, "scan_resultados_*"))
 	for _, scanDir := range matches {
 		info, err := os.Stat(scanDir)
 		if err != nil || !info.IsDir() {

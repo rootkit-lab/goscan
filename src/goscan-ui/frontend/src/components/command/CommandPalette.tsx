@@ -10,6 +10,8 @@ type Props = {
   onSelectFinding: (id: number) => void;
   onRunScript?: () => void;
   onStartScan?: () => void;
+  onTestAllFinding?: () => void;
+  onTestAllFiltered?: () => void;
 };
 
 export function CommandPalette({
@@ -20,7 +22,9 @@ export function CommandPalette({
   findings,
   onSelectFinding,
   onRunScript,
-  onStartScan
+  onStartScan,
+  onTestAllFinding,
+  onTestAllFiltered
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -65,6 +69,16 @@ export function CommandPalette({
           <li>
             <button type="button" className="w-full px-3 py-1.5 text-left text-[12px] hover:bg-vscode-hover" onClick={() => { onStartScan?.(); onClose(); }}>
               Start scan
+            </button>
+          </li>
+          <li>
+            <button type="button" className="w-full px-3 py-1.5 text-left text-[12px] hover:bg-vscode-hover" onClick={() => { onTestAllFinding?.(); onClose(); }}>
+              Test all checkers — finding actual
+            </button>
+          </li>
+          <li>
+            <button type="button" className="w-full px-3 py-1.5 text-left text-[12px] hover:bg-vscode-hover" onClick={() => { onTestAllFiltered?.(); onClose(); }}>
+              Test all checkers — filtro actual
             </button>
           </li>
           {filtered.map((f) => (

@@ -8,7 +8,18 @@ from pathlib import Path
 
 import requests
 
-from envutil import env_arg_parser, is_interactive, load_env_keys, main_missing, pick_key
+from envutil import (
+    DEFAULT_HTTP_TIMEOUT,
+    DEFAULT_OPERATION_TIMEOUT,
+    env_arg_parser,
+    format_network_error,
+    is_interactive,
+    load_env_keys,
+    log_step,
+    main_missing,
+    pick_key,
+    run_with_timeout,
+)
 
 
 def paypal_config(env: dict[str, str]) -> tuple[str, str, str]:
@@ -27,7 +38,7 @@ def get_token(client_id: str, secret: str, base: str) -> tuple[bool, str]:
         auth=(client_id, secret),
         data={"grant_type": "client_credentials"},
         headers={"Accept": "application/json"},
-        timeout=30,
+        timeout=DEFAULT_HTTP_TIMEOUT,
     )
     if r.status_code == 401:
         return False, "Credenciais inválidas (401)"
@@ -36,19 +47,30 @@ def get_token(client_id: str, secret: str, base: str) -> tuple[bool, str]:
     data = r.json()
     scope = data.get("scope", "")
     expires = data.get("expires_in", "?")
-    return True, f"Token OK — expira em {expires}s\nScope: {scope[:120]}…" if len(scope) > 120 else f"Token OK — expira em {expires}s\nScope: {scope}"
+    if len(scope) > 120:
+        return True, f"Token OK — expira em {expires}s\nScope: {scope[:120]}…"
+    return True, f"Token OK — expira em {expires}s\nScope: {scope}"
 
 
 def run_interactive(env: dict[str, str]) -> int:
     client_id, secret, base = paypal_config(env)
     mode = "live" if "sandbox" not in base else "sandbox"
-    print(f"PayPal detectado — modo {mode}")
-    print(f"  Client ID: …{client_id[-8:]}")
-    ok, msg = get_token(client_id, secret, base)
-    if not ok:
-        print(msg)
+    print(f"PayPal detectado — modo {mode}", flush=True)
+    print(f"  Client ID: …{client_id[-8:]}", flush=True)
+    log_step("A obter token OAuth…")
+    try:
+        ok, msg = run_with_timeout(
+            lambda: get_token(client_id, secret, base),
+            DEFAULT_OPERATION_TIMEOUT,
+            "PayPal OAuth",
+        )
+    except Exception as exc:
+        print(format_network_error(exc), flush=True)
         return 1
-    print(msg)
+    if not ok:
+        print(msg, flush=True)
+        return 1
+    print(msg, flush=True)
     return 0
 
 
@@ -57,10 +79,17 @@ def main() -> None:
     env = load_env_keys(Path(args.env))
     if is_interactive():
         sys.exit(run_interactive(env))
-    client_id, secret, base = paypal_config(env)
-    ok, msg = get_token(client_id, secret, base)
-    print(msg)
-    sys.exit(0 if ok else 1)
+    try:
+        ok, msg = run_with_timeout(
+            lambda: get_token(*paypal_config(env)),
+            DEFAULT_OPERATION_TIMEOUT,
+            "PayPal OAuth",
+        )
+        print(msg, flush=True)
+        sys.exit(0 if ok else 1)
+    except Exception as exc:
+        print(format_network_error(exc), flush=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

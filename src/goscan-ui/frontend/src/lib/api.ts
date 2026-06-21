@@ -10,6 +10,12 @@ export type FindingDTO = {
   scanRunId: string;
   foundAt: string;
   hasCredentials: boolean;
+  isNew?: boolean;
+};
+
+export type FindingsStatsDTO = {
+  total: number;
+  unopened: number;
 };
 
 export type FindingDetailDTO = FindingDTO & {
@@ -41,22 +47,115 @@ export type ScanProgressDTO = {
   running: boolean;
 };
 
+export type CheckerResultDTO = {
+  findingId: number;
+  scriptId: string;
+  scriptLabel: string;
+  status: "ok" | "fail" | "skip";
+  exitCode: number;
+  summary: string;
+  testedAt: string;
+};
+
+export type ScriptCheckerStatusDTO = {
+  scriptId: string;
+  label: string;
+  status: "ok" | "fail" | "skip" | "pending" | "running";
+  summary: string;
+  testedAt: string;
+  exitCode: number;
+  logPath?: string;
+};
+
+export type FindingCheckerOverviewDTO = {
+  findingId: number;
+  scripts: ScriptCheckerStatusDTO[];
+};
+
+export type BatchCheckOptsDTO = {
+  findingId?: number;
+  query?: string;
+  confidence?: string;
+  unopenedOnly?: boolean;
+  scriptId?: string;
+  quick?: boolean;
+  limit?: number;
+  threads?: number;
+};
+
+export type BatchProgressDTO = {
+  findingIndex: number;
+  findingTotal: number;
+  findingId: number;
+  domain: string;
+  scriptIndex: number;
+  scriptTotal: number;
+  scriptId: string;
+  scriptLabel: string;
+  status: string;
+  summary: string;
+  exitCode: number;
+  line: string;
+  running: boolean;
+  checkIndex: number;
+  checkTotal: number;
+  okCount: number;
+  failCount: number;
+  skipCount: number;
+  threads: number;
+};
+
+export type BatchDoneDTO = {
+  ok: number;
+  fail: number;
+  skip: number;
+  total: number;
+  secs: number;
+  logDir?: string;
+};
+
+export type SettingsDTO = {
+  mode: string;
+  dataDir: string;
+  scanDir: string;
+  appRoot: string;
+  defaultProdDataDir: string;
+  pointsToDevRepo: boolean;
+  needsSetup: boolean;
+  version: string;
+};
+
 const S = "main.App";
 
 export const api = {
-  searchFindings: (query: string, confidence: string, limit: number) =>
-    Call.ByName(`${S}.SearchFindings`, query, confidence, limit) as Promise<FindingDTO[]>,
+  searchFindings: (query: string, confidence: string, unopenedOnly: boolean, limit: number) =>
+    Call.ByName(`${S}.SearchFindings`, query, confidence, unopenedOnly, limit) as Promise<FindingDTO[]>,
+  findingsStats: () => Call.ByName(`${S}.FindingsStats`) as Promise<FindingsStatsDTO>,
   getFinding: (id: number) => Call.ByName(`${S}.GetFinding`, id) as Promise<FindingDetailDTO>,
   listScripts: () => Call.ByName(`${S}.ListScripts`) as Promise<ScriptDTO[]>,
   compatibleScripts: (findingId: number) =>
     Call.ByName(`${S}.CompatibleScripts`, findingId) as Promise<ScriptDTO[]>,
+  checkerOverview: (findingIds: number[]) =>
+    Call.ByName(`${S}.CheckerOverview`, findingIds) as Promise<FindingCheckerOverviewDTO[]>,
+  listCheckerResults: (findingId: number) =>
+    Call.ByName(`${S}.ListCheckerResults`, findingId) as Promise<CheckerResultDTO[]>,
   runScript: (scriptId: string, findingId: number) =>
     Call.ByName(`${S}.RunScript`, scriptId, findingId) as Promise<void>,
   cancelScript: () => Call.ByName(`${S}.CancelScript`) as Promise<void>,
   terminalInput: (data: string) => Call.ByName(`${S}.TerminalInput`, data) as Promise<void>,
   terminalResize: (cols: number, rows: number) => Call.ByName(`${S}.TerminalResize`, cols, rows) as Promise<void>,
   startScan: (opts: ScanOptsDTO) => Call.ByName(`${S}.StartScan`, opts) as Promise<void>,
-  cancelScan: () => Call.ByName(`${S}.CancelScan`) as Promise<void>
+  cancelScan: () => Call.ByName(`${S}.CancelScan`) as Promise<void>,
+  startBatchCheck: (opts: BatchCheckOptsDTO) => Call.ByName(`${S}.StartBatchCheck`, opts) as Promise<void>,
+  cancelBatchCheck: () => Call.ByName(`${S}.CancelBatchCheck`) as Promise<void>,
+  openBatchLogDir: (dir?: string) => Call.ByName(`${S}.OpenBatchLogDir`, dir ?? "") as Promise<void>,
+  getSettings: () => Call.ByName(`${S}.GetSettings`) as Promise<SettingsDTO>,
+  pickDirectory: (title: string, current: string) =>
+    Call.ByName(`${S}.PickDirectory`, title, current) as Promise<string>,
+  saveSettings: (dataDir: string, scanDir: string) =>
+    Call.ByName(`${S}.SaveSettings`, dataDir, scanDir) as Promise<void>,
+  openDataDirectory: () => Call.ByName(`${S}.OpenDataDirectory`) as Promise<void>,
+  openScanDirectory: () => Call.ByName(`${S}.OpenScanDirectory`) as Promise<void>
 };
 
 export { Events };

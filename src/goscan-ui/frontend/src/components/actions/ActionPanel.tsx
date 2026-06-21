@@ -1,19 +1,42 @@
 import { Play, Square } from "lucide-react";
-import type { ScanOptsDTO, ScriptDTO } from "@/lib/api";
+import { ScriptList } from "@/components/actions/ScriptList";
 import { CollapsibleSection } from "@/components/layout/CollapsibleSection";
+import { SettingsPanel } from "@/components/settings/SettingsPanel";
+import type { BatchProgressDTO, ScanOptsDTO, ScriptCheckerStatusDTO, SettingsDTO } from "@/lib/api";
 
 type Props = {
-  scripts: ScriptDTO[];
+  scripts: ScriptCheckerStatusDTO[];
   selectedScript: string;
   onScriptChange: (id: string) => void;
-  onRunScript: () => void;
-  canRunScript: boolean;
+  onRunScript: (scriptId?: string) => void;
   scanOpts: ScanOptsDTO & { threads: number; fast: boolean; rescan: boolean; timeoutSec: number };
   onScanOptsChange: (opts: Props["scanOpts"]) => void;
   onStartScan: () => void;
   onCancelScan: () => void;
   onCancelScript?: () => void;
+  onTestAllFinding?: () => void;
+  onTestAllFiltered?: () => void;
+  onTestAllQuick?: () => void;
+  onTestAllEnvs?: () => void;
+  onCancelBatch?: () => void;
+  batchRunning?: boolean;
+  batchProgress?: BatchProgressDTO | null;
+  batchLabel?: string;
+  batchThreads: number;
+  onBatchThreadsChange: (n: number) => void;
   terminalActive?: boolean;
+  runningScriptId?: string;
+  settings: SettingsDTO | null;
+  draftDataDir: string;
+  draftScanDir: string;
+  onDraftDataDirChange: (v: string) => void;
+  onDraftScanDirChange: (v: string) => void;
+  onPickDataDir: () => void;
+  onPickScanDir: () => void;
+  onSaveSettings: () => void;
+  onOpenDataDir: () => void;
+  onOpenScanDir: () => void;
+  settingsSaving?: boolean;
 };
 
 export function ActionPanel({
@@ -21,13 +44,34 @@ export function ActionPanel({
   selectedScript,
   onScriptChange,
   onRunScript,
-  canRunScript,
   scanOpts,
   onScanOptsChange,
   onStartScan,
   onCancelScan,
   onCancelScript,
-  terminalActive
+  onTestAllFinding,
+  onTestAllFiltered,
+  onTestAllQuick,
+  onTestAllEnvs,
+  onCancelBatch,
+  batchRunning,
+  batchProgress,
+  batchLabel,
+  batchThreads,
+  onBatchThreadsChange,
+  terminalActive,
+  runningScriptId,
+  settings,
+  draftDataDir,
+  draftScanDir,
+  onDraftDataDirChange,
+  onDraftScanDirChange,
+  onPickDataDir,
+  onPickScanDir,
+  onSaveSettings,
+  onOpenDataDir,
+  onOpenScanDir,
+  settingsSaving
 }: Props) {
   return (
     <div className="flex h-full flex-col overflow-auto">
@@ -35,31 +79,40 @@ export function ActionPanel({
         Actions
       </div>
 
+      <SettingsPanel
+        settings={settings}
+        draftDataDir={draftDataDir}
+        draftScanDir={draftScanDir}
+        onDraftDataDirChange={onDraftDataDirChange}
+        onDraftScanDirChange={onDraftScanDirChange}
+        onPickDataDir={onPickDataDir}
+        onPickScanDir={onPickScanDir}
+        onSave={onSaveSettings}
+        onOpenDataDir={onOpenDataDir}
+        onOpenScanDir={onOpenScanDir}
+        saving={settingsSaving}
+      />
+
       <CollapsibleSection title="Scripts">
-        <label className="mb-1 block text-[11px] text-vscode-muted">Checker</label>
-        <select
-          className="vscode-input mb-2"
-          value={selectedScript}
-          onChange={(e) => onScriptChange(e.target.value)}
-        >
-          {scripts.length === 0 && <option value="">(none compatible)</option>}
-          {scripts.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.label}
-            </option>
-          ))}
-        </select>
-        <div className="flex gap-1">
-          <button type="button" className="vscode-btn vscode-btn-primary flex flex-1 items-center justify-center gap-1" disabled={!canRunScript} onClick={onRunScript}>
-            <Play className="h-3.5 w-3.5" />
-            Run script
-          </button>
-          {terminalActive && onCancelScript && (
-            <button type="button" className="vscode-btn flex items-center justify-center px-2" onClick={onCancelScript} title="Parar script">
-              <Square className="h-3.5 w-3.5" />
-            </button>
-          )}
-        </div>
+        <ScriptList
+          scripts={scripts}
+          selectedScript={selectedScript}
+          onScriptChange={onScriptChange}
+          onRunScript={onRunScript}
+          onCancelScript={onCancelScript}
+          onTestAllFinding={onTestAllFinding}
+          onTestAllFiltered={onTestAllFiltered}
+          onTestAllQuick={onTestAllQuick}
+          onTestAllEnvs={onTestAllEnvs}
+          onCancelBatch={onCancelBatch}
+          batchRunning={batchRunning}
+          batchProgress={batchProgress}
+          batchLabel={batchLabel}
+          batchThreads={batchThreads}
+          onBatchThreadsChange={onBatchThreadsChange}
+          terminalActive={terminalActive}
+          runningScriptId={runningScriptId}
+        />
       </CollapsibleSection>
 
       <CollapsibleSection title="Scan">

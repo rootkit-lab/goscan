@@ -4,9 +4,15 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
+import os
 import re
+import secrets
+import socket
 import sys
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse
 
@@ -22,6 +28,84 @@ URL_HINT_KEYS = (
     "NEXT_PUBLIC_APP_URL", "REACT_APP_API_URL", "SANCTUM_STATEFUL_DOMAINS",
 )
 URL_IN_VALUE_RE = re.compile(r"https?://[^\s\"'<>]+", re.I)
+
+DEFAULT_CONNECT_TIMEOUT = 15
+DEFAULT_HTTP_TIMEOUT = 20
+DEFAULT_OPERATION_TIMEOUT = 25
+
+STANDARD_SMTP_PORTS = frozenset({25, 465, 587})
+
+GOSCAN_TEST_EMAIL = "rootmasters@proton.me"
+
+
+def log_step(msg: str) -> None:
+    print(msg, flush=True)
+
+
+def run_with_timeout(fn, timeout_sec: int = DEFAULT_OPERATION_TIMEOUT, label: str = "Operação"):
+    """Executa fn num thread; falha com TimeoutError se exceder o limite."""
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        fut = pool.submit(fn)
+        try:
+            return fut.result(timeout=timeout_sec)
+        except FuturesTimeout as exc:
+            raise TimeoutError(f"{label} excedeu {timeout_sec}s") from exc
+
+
+def network_socket_timeout(seconds: int = DEFAULT_CONNECT_TIMEOUT) -> None:
+    socket.setdefaulttimeout(seconds)
+
+
+def format_timeout(label: str, seconds: int) -> str:
+    return f"{label} excedeu {seconds}s — host inacessível, firewall ou credenciais incorrectas?"
+
+
+def format_network_error(exc: Exception) -> str:
+    if isinstance(exc, TimeoutError):
+        return str(exc)
+    if isinstance(exc, OSError):
+        return f"Rede: {exc}"
+    return f"Falha: {exc}"
+
+
+def is_batch_mode(args=None) -> bool:
+    if os.environ.get("GOSCAN_BATCH", "").strip().lower() in ("1", "true", "yes"):
+        return True
+    if args is not None and getattr(args, "batch", False):
+        return True
+    return False
+
+
+def batch_or_interactive(args) -> bool:
+    return is_interactive() and not is_batch_mode(args)
+
+
+def random_email_content(domain: str) -> tuple[str, str]:
+    token = secrets.token_hex(4)
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    dom = domain or "unknown"
+    subject = f"goscan {dom} {token}"
+    body = (
+        f"Teste automático goscan\n\n"
+        f"domínio: {dom}\n"
+        f"hora: {ts}\n"
+        f"token: {token}\n"
+    )
+    return subject, body
+
+
+def print_summary(msg: str) -> None:
+    print(f"SUMMARY: {msg}", flush=True)
+
+
+def fmt_bytes(n: int) -> str:
+    if n < 1024:
+        return f"{n} B"
+    if n < 1024 * 1024:
+        return f"{n / 1024:.1f} KB"
+    if n < 1024 * 1024 * 1024:
+        return f"{n / (1024 * 1024):.1f} MB"
+    return f"{n / (1024 * 1024 * 1024):.2f} GB"
 
 
 @dataclass
@@ -61,6 +145,27 @@ def finding_domain(env_path: Path) -> str | None:
         if idx + 1 < len(parts):
             return parts[idx + 1]
     return None
+
+
+def is_private_ip(host: str | None) -> bool:
+    if not host:
+        return False
+    h = host.strip().strip("[]")
+    try:
+        ip = ipaddress.ip_address(h)
+        return ip.is_private or ip.is_loopback or ip.is_link_local
+    except ValueError:
+        return False
+
+
+def skip_private_db_host(raw: str | None, label: str = "DB_HOST") -> None:
+    """SKIP (exit 2) when DB host is RFC1918/loopback — inacessível do scan externo."""
+    if not raw:
+        return
+    host = raw.strip()
+    if is_private_ip(host):
+        print(f"SKIP: {label}={host} (IP privado/local inacessível externamente)", file=sys.stderr)
+        sys.exit(2)
 
 
 def is_local_host(host: str | None) -> bool:
@@ -146,6 +251,128 @@ def resolve_remote_host(raw: str | None, env_path: Path, env: dict[str, str]) ->
     return target, f"{raw} → {target} ({source})"
 
 
+def resolve_service_host(
+    raw: str | None,
+    env_path: Path,
+    env: dict[str, str],
+    prefixes: tuple[str, ...] = ("db",),
+) -> tuple[str | None, str | None]:
+    """Resolve local/docker host: APP_URL/finding domain first, then common subdomains."""
+    if raw is None:
+        return None, None
+    raw = raw.strip()
+    if not raw or not is_local_host(raw):
+        return raw or None, None
+
+    target, source = pick_remote_target(env_path, env)
+    if target:
+        return target, f"{raw} → {target} ({source})"
+
+    domain = finding_domain(env_path)
+    if domain:
+        for prefix in prefixes:
+            if not prefix:
+                continue
+            candidate = f"{prefix}.{domain}"
+            if candidate and not is_local_host(candidate):
+                return candidate, f"{raw} → {candidate} (subdomínio)"
+        return domain, f"{raw} → {domain} (domínio do finding)"
+
+    return raw, None
+
+
+def resolve_mail_host(
+    raw: str | None,
+    env_path: Path,
+    env: dict[str, str],
+    port: int = 587,
+) -> tuple[str | None, str | None]:
+    if raw is None:
+        return None, None
+    raw = raw.strip()
+    if not raw or not is_local_host(raw):
+        return raw or None, None
+
+    target, source = pick_remote_target(env_path, env)
+    if target:
+        return target, f"{raw} → {target} ({source})"
+
+    # Portas não-padrão (ex. 2525): não inventar smtp.{domain}
+    if port not in STANDARD_SMTP_PORTS:
+        domain = finding_domain(env_path)
+        if domain:
+            return domain, f"{raw} → {domain} (domínio; porta {port} não-padrão)"
+        return raw, None
+
+    return resolve_service_host(raw, env_path, env, ("mail", "smtp"))
+
+
+def resolve_redis_host(raw: str | None, env_path: Path, env: dict[str, str]) -> tuple[str | None, str | None]:
+    """Redis raramente exposto em redis.{domain}; usar só target remoto do .env/finding."""
+    return resolve_service_host(raw, env_path, env, ())
+
+
+def resolve_db_hosts(raw: str | None, env_path: Path, env: dict[str, str]) -> list[tuple[str, str | None]]:
+    """Ordered host candidates for DB connect attempts."""
+    seen: set[str] = set()
+    out: list[tuple[str, str | None]] = []
+
+    def add(host: str | None, note: str | None) -> None:
+        if not host:
+            return
+        key = host.lower()
+        if key in seen:
+            return
+        seen.add(key)
+        out.append((host, note))
+
+    primary, note = resolve_service_host(raw, env_path, env, ("db",))
+    add(primary, note)
+    domain = finding_domain(env_path)
+    if domain:
+        add(f"db.{domain}", f"fallback db.{domain}")
+        add(domain, f"fallback {domain}")
+    if not out and raw:
+        add(raw.strip(), None)
+    return out
+
+
+def skip_smtp_dev_host(ctx: EnvContext, host: str, port: int) -> None:
+    """SKIP quando host local foi mapeado ao domínio web com porta de dev (mailhog etc.)."""
+    domain = finding_domain(ctx.path)
+    if not domain or port in STANDARD_SMTP_PORTS:
+        return
+    h = (host or "").lower().rstrip(".")
+    d = domain.lower().rstrip(".")
+    if h == d or h.endswith("." + d):
+        print(
+            f"SKIP: MAIL_HOST local → {host}:{port} (porta dev; sem SMTP público)",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+
+def skip_redis_unlikely(ctx: EnvContext) -> None:
+    """SKIP Redis quando cache/sessão não usa Redis."""
+    cache = (ctx.get(["CACHE_DRIVER", "CACHE_STORE"]) or "").lower()
+    session = (ctx.get(["SESSION_DRIVER"]) or "").lower()
+    if cache in ("file", "database", "array", "apc", "cookie", "dynamodb"):
+        print(f"SKIP: CACHE_DRIVER={cache}", file=sys.stderr)
+        sys.exit(2)
+    if cache == "" and session in ("file", "cookie", "database"):
+        print(f"SKIP: SESSION_DRIVER={session} (sem cache Redis)", file=sys.stderr)
+        sys.exit(2)
+
+
+def parse_port(raw: str | None, default: int = 587) -> int | None:
+    if raw is None:
+        return default
+    val = raw.strip()
+    if not val or "YOUR_" in val.upper() or not val.isdigit():
+        return None
+    return int(val)
+
+
 def resolve_remote_url(raw: str | None, env_path: Path, env: dict[str, str]) -> tuple[str | None, str | None]:
     if not raw:
         return None, None
@@ -183,13 +410,14 @@ def resolve_remote_url(raw: str | None, env_path: Path, env: dict[str, str]) -> 
 
 def print_host_note(note: str | None) -> None:
     if note:
-        print(f"  ↳ {note}")
+        print(f"  ↳ {note}", flush=True)
 
 
 def env_arg_parser(description: str) -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=description)
     p.add_argument("--env", required=True, help="Caminho do ficheiro .env")
     p.add_argument("--key", default="", help="Variável específica (opcional)")
+    p.add_argument("--batch", action="store_true", help="Modo batch (sem prompts, email de teste)")
     return p
 
 
@@ -232,23 +460,24 @@ def select_from_list(prompt: str, items: list[str]) -> str | None:
 
 
 def chat_loop(ask_fn, name: str = "assistente") -> None:
-    print(f"\nConversa com {name}. Digite 'sair' para terminar.\n")
+    print(f"\nConversa com {name}. Digite 'sair' para terminar.\n", flush=True)
     while True:
         try:
             prompt = input("você> ").strip()
         except (EOFError, KeyboardInterrupt):
-            print("\nAté logo.")
+            print("\nAté logo.", flush=True)
             break
         if not prompt:
             continue
         if prompt.lower() in ("sair", "exit", "quit"):
-            print("Até logo.")
+            print("Até logo.", flush=True)
             break
         try:
+            log_step(f"A consultar {name}…")
             reply = ask_fn(prompt)
-            print(f"\n{name}> {reply}\n")
+            print(f"\n{name}> {reply}\n", flush=True)
         except Exception as exc:
-            print(f"Erro: {exc}\n")
+            print(f"Erro: {exc}\n", flush=True)
 
 
 def prompt_required(label: str) -> str:

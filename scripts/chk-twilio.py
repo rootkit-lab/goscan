@@ -8,7 +8,20 @@ from pathlib import Path
 
 import requests
 
-from envutil import env_arg_parser, is_interactive, load_env_keys, main_missing, pick_key, prompt_optional, prompt_required
+from envutil import (
+    DEFAULT_HTTP_TIMEOUT,
+    DEFAULT_OPERATION_TIMEOUT,
+    env_arg_parser,
+    format_network_error,
+    is_interactive,
+    load_env_keys,
+    log_step,
+    main_missing,
+    pick_key,
+    prompt_optional,
+    prompt_required,
+    run_with_timeout,
+)
 
 
 def twilio_config(env: dict[str, str]) -> tuple[str, str]:
@@ -20,7 +33,11 @@ def twilio_config(env: dict[str, str]) -> tuple[str, str]:
 
 
 def fetch_account(sid: str, token: str) -> tuple[bool, str]:
-    r = requests.get(f"https://api.twilio.com/2010-04-01/Accounts/{sid}.json", auth=(sid, token), timeout=30)
+    r = requests.get(
+        f"https://api.twilio.com/2010-04-01/Accounts/{sid}.json",
+        auth=(sid, token),
+        timeout=DEFAULT_HTTP_TIMEOUT,
+    )
     if r.status_code == 401:
         return False, "Credenciais inválidas (401)"
     if r.status_code != 200:
@@ -34,7 +51,7 @@ def send_sms(sid: str, token: str, from_num: str, to_num: str, body: str) -> Non
         f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json",
         auth=(sid, token),
         data={"From": from_num, "To": to_num, "Body": body},
-        timeout=30,
+        timeout=DEFAULT_HTTP_TIMEOUT,
     )
     if r.status_code not in (200, 201):
         raise RuntimeError(f"HTTP {r.status_code}: {r.text[:300]}")
@@ -42,11 +59,16 @@ def send_sms(sid: str, token: str, from_num: str, to_num: str, body: str) -> Non
 
 def run_interactive(env: dict[str, str]) -> int:
     sid, token = twilio_config(env)
-    ok, msg = fetch_account(sid, token)
-    if not ok:
-        print(msg)
+    log_step("A validar conta Twilio…")
+    try:
+        ok, msg = run_with_timeout(lambda: fetch_account(sid, token), DEFAULT_OPERATION_TIMEOUT, "Twilio")
+    except Exception as exc:
+        print(format_network_error(exc), flush=True)
         return 1
-    print(f"Twilio OK — {msg}")
+    if not ok:
+        print(msg, flush=True)
+        return 1
+    print(f"Twilio OK — {msg}", flush=True)
 
     send = prompt_optional("Enviar SMS de teste? (s/N)", "n").lower()
     if send not in ("s", "sim", "y", "yes"):
@@ -56,13 +78,18 @@ def run_interactive(env: dict[str, str]) -> int:
     to_num = prompt_required("Número destinatário (+…)")
     body = prompt_required("Mensagem SMS")
 
+    log_step("A enviar SMS…")
     try:
-        send_sms(sid, token, from_num, to_num, body)
+        run_with_timeout(
+            lambda: send_sms(sid, token, from_num, to_num, body),
+            DEFAULT_OPERATION_TIMEOUT,
+            "Twilio SMS",
+        )
     except Exception as exc:
-        print(f"Falha ao enviar: {exc}")
+        print(format_network_error(exc), flush=True)
         return 1
 
-    print(f"OK — SMS enviado para {to_num}")
+    print(f"OK — SMS enviado para {to_num}", flush=True)
     return 0
 
 
@@ -71,9 +98,17 @@ def main() -> None:
     env = load_env_keys(Path(args.env))
     if is_interactive():
         sys.exit(run_interactive(env))
-    ok, msg = fetch_account(*twilio_config(env))
-    print(msg)
-    sys.exit(0 if ok else 1)
+    try:
+        ok, msg = run_with_timeout(
+            lambda: fetch_account(*twilio_config(env)),
+            DEFAULT_OPERATION_TIMEOUT,
+            "Twilio",
+        )
+        print(msg, flush=True)
+        sys.exit(0 if ok else 1)
+    except Exception as exc:
+        print(format_network_error(exc), flush=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

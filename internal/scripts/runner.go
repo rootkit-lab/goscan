@@ -105,11 +105,8 @@ func (r *Runner) CompatibleScripts(envPath string) ([]ScriptInfo, error) {
 	}
 	var out []ScriptInfo
 	for _, s := range r.registry.Scripts {
-		for _, ek := range s.EnvKeys {
-			if keys[ek] != "" {
-				out = append(out, s)
-				break
-			}
+		if scriptCompatible(s, keys) {
+			out = append(out, s)
 		}
 	}
 	return out, nil
@@ -126,6 +123,10 @@ func (r *Runner) Cancel() {
 }
 
 func (r *Runner) Run(ctx context.Context, scriptID, envPath string, emit EventEmitter, timeout time.Duration) RunResult {
+	return r.runScript(ctx, scriptID, envPath, emit, timeout, false)
+}
+
+func (r *Runner) runScript(ctx context.Context, scriptID, envPath string, emit EventEmitter, timeout time.Duration, batch bool) RunResult {
 	res := RunResult{ScriptID: scriptID}
 	s, err := r.Find(scriptID)
 	if err != nil {
@@ -161,9 +162,14 @@ func (r *Runner) Run(ctx context.Context, scriptID, envPath string, emit EventEm
 	r.mu.Unlock()
 	defer cancel()
 
-	cmd := exec.CommandContext(runCtx, PythonExecutable(r.repoRoot), scriptPath, "--env", absEnv)
+	cmd := exec.CommandContext(runCtx, PythonExecutable(r.repoRoot), "-u", scriptPath, "--env", absEnv)
+	if batch {
+		cmd.Args = append(cmd.Args, "--batch")
+		cmd.Env = BatchScriptEnv(r.repoRoot)
+	} else {
+		cmd.Env = ScriptEnv(r.repoRoot)
+	}
 	cmd.Dir = filepath.Join(r.repoRoot, "scripts")
-	cmd.Env = ScriptEnv(r.repoRoot)
 
 	stdout, _ := cmd.StdoutPipe()
 	stderr, _ := cmd.StderrPipe()

@@ -16,30 +16,45 @@ import (
 )
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "findings" {
-		os.Args = append([]string{os.Args[0]}, os.Args[2:]...)
-		runFindingsCLI()
-		return
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "findings":
+			os.Args = append([]string{os.Args[0]}, os.Args[2:]...)
+			runFindingsCLI()
+			return
+		case "test-all":
+			os.Args = append([]string{os.Args[0]}, os.Args[2:]...)
+			runTestAllCLI()
+			return
+		case "batch-analyze":
+			os.Args = append([]string{os.Args[0]}, os.Args[2:]...)
+			runBatchAnalyzeCLI()
+			return
+		}
 	}
 	runScanCLI()
 }
 
-func repoRoot() string {
-	root, err := paths.RepoRoot()
+func resolveRoots() (appRoot, dataRoot string) {
+	app, err := paths.AppRoot()
 	if err != nil {
 		wd, _ := os.Getwd()
-		return wd
+		app = wd
 	}
-	return root
+	data, err := paths.DataRoot()
+	if err != nil {
+		data = app
+	}
+	return app, data
 }
 
 func runScanCLI() {
-	root := repoRoot()
-	cfg := &scanner.Config{RepoRoot: root}
+	_, dataRoot := resolveRoots()
+	cfg := &scanner.Config{RepoRoot: dataRoot}
 
-	flag.StringVar(&cfg.Dir, "dir", filepath.Join(root, "files"), "Diretório com .env ou listas .txt")
-	flag.StringVar(&cfg.DBPath, "db", paths.DefaultDBPath(root), "SQLite de domínios")
-	flag.StringVar(&cfg.FindingsDir, "findings", paths.FindingsRoot(root), "Diretório de findings")
+	flag.StringVar(&cfg.Dir, "dir", filepath.Join(dataRoot, "files"), "Diretório com .env ou listas .txt")
+	flag.StringVar(&cfg.DBPath, "db", paths.DefaultDBPath(dataRoot), "SQLite de domínios")
+	flag.StringVar(&cfg.FindingsDir, "findings", paths.FindingsRoot(dataRoot), "Diretório de findings")
 	flag.StringVar(&cfg.RunID, "run-id", "", "ID do run (default: timestamp)")
 	flag.IntVar(&cfg.Threads, "threads", 100, "Workers de scan")
 	flag.IntVar(&cfg.PathWorkers, "path-workers", 8, "Paths paralelos por domínio")
@@ -61,9 +76,9 @@ func runScanCLI() {
 }
 
 func runFindingsCLI() {
-	root := repoRoot()
-	dbPath := paths.DefaultDBPath(root)
-	findingsDir := paths.FindingsRoot(root)
+	_, dataRoot := resolveRoots()
+	dbPath := paths.DefaultDBPath(dataRoot)
+	findingsDir := paths.FindingsRoot(dataRoot)
 	query := flag.String("query", "", "Pesquisa FTS (domínio/conteúdo)")
 	confidence := flag.String("confidence", "", "Filtrar HIGH/MEDIUM/LOW")
 	limit := flag.Int("limit", 50, "Limite de resultados")

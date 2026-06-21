@@ -22,13 +22,20 @@ type Finding struct {
 	FoundAt         string `json:"foundAt"`
 	HasCredentials  bool   `json:"hasCredentials"`
 	ContentHash     string `json:"contentHash"`
+	OpenedAt        string `json:"openedAt"`
 }
 
 type FindingsFilter struct {
 	Query          string
 	Confidence     string
 	HasCredentials *bool
+	UnopenedOnly   bool
 	Limit          int
+}
+
+type FindingsStats struct {
+	Total    int64 `json:"total"`
+	Unopened int64 `json:"unopened"`
 }
 
 // FindingsStore manages findings table + FTS5 index.
@@ -69,6 +76,9 @@ func (fs *FindingsStore) migrate() error {
 			return err
 		}
 	}
+	if err := fs.ensureOpenedAtColumn(); err != nil {
+		return err
+	}
 
 	var name string
 	err := fs.db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='findings_fts'`).Scan(&name)
@@ -98,6 +108,30 @@ func (fs *FindingsStore) migrate() error {
 		END`)
 	}
 	return err
+}
+
+func (fs *FindingsStore) ensureOpenedAtColumn() error {
+	var name string
+	err := fs.db.QueryRow(`SELECT name FROM pragma_table_info('findings') WHERE name='opened_at'`).Scan(&name)
+	if err == sql.ErrNoRows {
+		_, err = fs.db.Exec(`ALTER TABLE findings ADD COLUMN opened_at TEXT`)
+	}
+	return err
+}
+
+func (fs *FindingsStore) MarkOpened(id int64) error {
+	_, err := fs.db.Exec(`UPDATE findings SET opened_at = datetime('now') WHERE id = ? AND (opened_at IS NULL OR opened_at = '')`, id)
+	return err
+}
+
+func (fs *FindingsStore) Stats() (FindingsStats, error) {
+	var s FindingsStats
+	err := fs.db.QueryRow(`SELECT COUNT(*) FROM findings`).Scan(&s.Total)
+	if err != nil {
+		return s, err
+	}
+	err = fs.db.QueryRow(`SELECT COUNT(*) FROM findings WHERE opened_at IS NULL OR opened_at = ''`).Scan(&s.Unopened)
+	return s, err
 }
 
 func ContentHash(content []byte) string {
@@ -199,10 +233,22 @@ func (fs *FindingsStore) Get(id int64) (*Finding, string, error) {
 	return &f, content, nil
 }
 
+func (fs *FindingsStore) GetFilePath(id int64) (string, error) {
+	var rel string
+	err := fs.db.QueryRow(`SELECT file_path FROM findings WHERE id = ?`, id).Scan(&rel)
+	return rel, err
+}
+
 func (fs *FindingsStore) Search(filter FindingsFilter) ([]Finding, error) {
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 100
+	}
+	unopenedFTS := ""
+	unopenedPlain := ""
+	if filter.UnopenedOnly {
+		unopenedFTS = ` AND (f.opened_at IS NULL OR f.opened_at = '')`
+		unopenedPlain = ` AND (opened_at IS NULL OR opened_at = '')`
 	}
 
 	var rows *sql.Rows
@@ -210,15 +256,16 @@ func (fs *FindingsStore) Search(filter FindingsFilter) ([]Finding, error) {
 
 	if strings.TrimSpace(filter.Query) != "" {
 		q := strings.TrimSpace(filter.Query)
-		sqlQuery := `SELECT f.id, f.domain, f.path, f.url, f.confidence, f.file_path, f.scan_run_id, f.found_at, f.has_credentials, f.content_hash
+		sqlQuery := `SELECT f.id, f.domain, f.path, f.url, f.confidence, f.file_path, f.scan_run_id, f.found_at, f.has_credentials, f.content_hash, COALESCE(f.opened_at, '')
 			FROM findings f
 			JOIN findings_fts fts ON f.id = fts.rowid
-			WHERE findings_fts MATCH ?
+			WHERE findings_fts MATCH ?` + unopenedFTS + `
 			ORDER BY f.found_at DESC LIMIT ?`
 		rows, err = fs.db.Query(sqlQuery, q+"*", limit)
 	} else {
-		sqlQuery := `SELECT id, domain, path, url, confidence, file_path, scan_run_id, found_at, has_credentials, content_hash
-			FROM findings ORDER BY found_at DESC LIMIT ?`
+		sqlQuery := `SELECT id, domain, path, url, confidence, file_path, scan_run_id, found_at, has_credentials, content_hash, COALESCE(opened_at, '')
+			FROM findings WHERE 1=1` + unopenedPlain + `
+			ORDER BY found_at DESC LIMIT ?`
 		rows, err = fs.db.Query(sqlQuery, limit)
 	}
 	if err != nil {
@@ -230,7 +277,7 @@ func (fs *FindingsStore) Search(filter FindingsFilter) ([]Finding, error) {
 	for rows.Next() {
 		var f Finding
 		var hc int
-		if err := rows.Scan(&f.ID, &f.Domain, &f.Path, &f.URL, &f.Confidence, &f.FilePath, &f.ScanRunID, &f.FoundAt, &hc, &f.ContentHash); err != nil {
+		if err := rows.Scan(&f.ID, &f.Domain, &f.Path, &f.URL, &f.Confidence, &f.FilePath, &f.ScanRunID, &f.FoundAt, &hc, &f.ContentHash, &f.OpenedAt); err != nil {
 			return nil, err
 		}
 		f.HasCredentials = hc == 1

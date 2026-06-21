@@ -8,7 +8,19 @@ from pathlib import Path
 
 import requests
 
-from envutil import env_arg_parser, is_interactive, load_env_keys, main_missing, pick_key, prompt_optional
+from envutil import (
+    DEFAULT_HTTP_TIMEOUT,
+    DEFAULT_OPERATION_TIMEOUT,
+    env_arg_parser,
+    format_network_error,
+    is_interactive,
+    load_env_keys,
+    log_step,
+    main_missing,
+    pick_key,
+    prompt_optional,
+    run_with_timeout,
+)
 
 
 def supabase_config(env: dict[str, str]) -> tuple[str, str]:
@@ -29,7 +41,7 @@ def probe(url: str, key: str) -> tuple[bool, str]:
     r = requests.get(
         f"{url}/rest/v1/",
         headers={"apikey": key, "Authorization": f"Bearer {key}"},
-        timeout=30,
+        timeout=DEFAULT_HTTP_TIMEOUT,
     )
     if r.status_code == 401:
         return False, "Chave inválida (401)"
@@ -42,7 +54,7 @@ def list_tables(url: str, key: str) -> str:
     r = requests.get(
         f"{url}/rest/v1/",
         headers={"apikey": key, "Authorization": f"Bearer {key}", "Accept": "application/openapi+json"},
-        timeout=30,
+        timeout=DEFAULT_HTTP_TIMEOUT,
     )
     if r.status_code != 200:
         return f"Não foi possível listar tabelas: HTTP {r.status_code}"
@@ -57,16 +69,28 @@ def list_tables(url: str, key: str) -> str:
 
 def run_interactive(env: dict[str, str]) -> int:
     url, key = supabase_config(env)
-    print(f"Supabase: {url}")
-    ok, msg = probe(url, key)
-    if not ok:
-        print(msg)
+    print(f"Supabase: {url}", flush=True)
+    log_step("A validar API REST…")
+    try:
+        ok, msg = run_with_timeout(lambda: probe(url, key), DEFAULT_OPERATION_TIMEOUT, "Supabase")
+    except Exception as exc:
+        print(format_network_error(exc), flush=True)
         return 1
-    print(f"Chave válida — {msg}")
+    if not ok:
+        print(msg, flush=True)
+        return 1
+    print(f"Chave válida — {msg}", flush=True)
 
     show = prompt_optional("Listar tabelas REST? (S/n)", "s").lower()
     if show not in ("n", "nao", "no"):
-        print(list_tables(url, key))
+        log_step("A listar tabelas…")
+        try:
+            print(
+                run_with_timeout(lambda: list_tables(url, key), DEFAULT_OPERATION_TIMEOUT, "Supabase tabelas"),
+                flush=True,
+            )
+        except Exception as exc:
+            print(format_network_error(exc), flush=True)
     return 0
 
 
@@ -75,9 +99,17 @@ def main() -> None:
     env = load_env_keys(Path(args.env))
     if is_interactive():
         sys.exit(run_interactive(env))
-    ok, msg = probe(*supabase_config(env))
-    print(msg)
-    sys.exit(0 if ok else 1)
+    try:
+        ok, msg = run_with_timeout(
+            lambda: probe(*supabase_config(env)),
+            DEFAULT_OPERATION_TIMEOUT,
+            "Supabase",
+        )
+        print(msg, flush=True)
+        sys.exit(0 if ok else 1)
+    except Exception as exc:
+        print(format_network_error(exc), flush=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
