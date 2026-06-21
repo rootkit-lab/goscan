@@ -48,13 +48,18 @@ jobs:
       - name: Dependências sistema
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3 python3-venv python3-pip rsync
+          sudo apt-get install -y \
+            python3 python3-venv python3-pip rsync \
+            build-essential pkg-config \
+            libgtk-3-dev libwebkit2gtk-4.1-dev
 
       - name: Frontend deps
         run: cd src/goscan-ui/frontend && npm ci
 
       - name: Build release
-        run: make release
+        run: |
+          chmod +x scripts/package/build-release.sh
+          ./scripts/package/build-release.sh
 
       - name: Empacotar .deb
         run: |
@@ -64,7 +69,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: goscan-deb
-          path: dist/goscan_${{ steps.ver.outputs.version }}_amd64.deb
+          path: dist/goscan_*_amd64.deb
 
   build-msi:
     name: Windows .msi
@@ -94,25 +99,22 @@ jobs:
           cache-dependency-path: src/goscan-ui/frontend/package-lock.json
 
       - name: Dependências build
-        run: choco install make -y
+        run: choco install make wixtoolset --no-progress -y
 
       - name: Frontend deps
         shell: bash
         run: cd src/goscan-ui/frontend && npm ci
 
-      - name: WiX Toolset
-        run: dotnet tool install --global wix --version 5.0.2
-
       - name: Empacotar .msi
         shell: pwsh
         run: |
-          $env:Path = "$env:USERPROFILE\.dotnet\tools;$env:Path"
+          $env:Path = "C:\Program Files (x86)\WiX Toolset v3.14\bin;$env:Path"
           pwsh -File scripts/package/msi/build.ps1
 
       - uses: actions/upload-artifact@v4
         with:
           name: goscan-msi
-          path: dist/goscan_${{ steps.ver.outputs.version }}_amd64.msi
+          path: dist/goscan_*_amd64.msi
 
   github-release:
     name: GitHub Release
