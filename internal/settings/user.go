@@ -8,10 +8,15 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// User stores workspace paths chosen in the UI.
+// User stores workspace paths and UI preferences chosen in the app.
 type User struct {
-	DataDir string `yaml:"data_dir"`
-	ScanDir string `yaml:"scan_dir"`
+	DataDir        string `yaml:"data_dir"`
+	ScanDir        string `yaml:"scan_dir"`
+	PythonPath     string `yaml:"python_path,omitempty"`
+	NotifyEnvFound *bool  `yaml:"notify_env_found,omitempty"`
+	NotifyScriptOk *bool  `yaml:"notify_script_ok,omitempty"`
+	SoundEnvFound  *bool  `yaml:"sound_env_found,omitempty"`
+	SoundScriptOk  *bool  `yaml:"sound_script_ok,omitempty"`
 }
 
 func configPath() (string, error) {
@@ -73,6 +78,7 @@ func Load() (User, error) {
 	}
 	u.DataDir = strings.TrimSpace(u.DataDir)
 	u.ScanDir = strings.TrimSpace(u.ScanDir)
+	u.PythonPath = strings.TrimSpace(u.PythonPath)
 	return u, nil
 }
 
@@ -84,11 +90,44 @@ func Save(u User) error {
 	}
 	u.DataDir = strings.TrimSpace(u.DataDir)
 	u.ScanDir = strings.TrimSpace(u.ScanDir)
+	u.PythonPath = strings.TrimSpace(u.PythonPath)
 	body, err := yaml.Marshal(u)
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(path, body, 0644)
+}
+
+// NotifyEnvFoundOrDefault returns whether to notify when a new .env is found.
+func (u User) NotifyEnvFoundOrDefault() bool {
+	if u.NotifyEnvFound != nil {
+		return *u.NotifyEnvFound
+	}
+	return true
+}
+
+// NotifyScriptOkOrDefault returns whether to notify when a checker succeeds.
+func (u User) NotifyScriptOkOrDefault() bool {
+	if u.NotifyScriptOk != nil {
+		return *u.NotifyScriptOk
+	}
+	return true
+}
+
+// SoundEnvFoundOrDefault returns whether to play a sound when a new .env is found.
+func (u User) SoundEnvFoundOrDefault() bool {
+	if u.SoundEnvFound != nil {
+		return *u.SoundEnvFound
+	}
+	return false
+}
+
+// SoundScriptOkOrDefault returns whether to play a sound when a checker succeeds.
+func (u User) SoundScriptOkOrDefault() bool {
+	if u.SoundScriptOk != nil {
+		return *u.SoundScriptOk
+	}
+	return true
 }
 
 // SaveProdDefaults writes prod XDG paths if missing or force is true.

@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"goscan/internal/settings"
 )
 
 func venvPythonPath(repoRoot string) string {
@@ -22,8 +24,15 @@ func VenvReady(repoRoot string) bool {
 	return err == nil && !st.IsDir()
 }
 
-// PythonExecutable devolve o Python dos checkers (venv ou erro explícito).
+// PythonExecutable devolve o Python dos checkers (settings → venv → python3).
 func PythonExecutable(repoRoot string) string {
+	if u, err := settings.Load(); err == nil {
+		if p := strings.TrimSpace(u.PythonPath); p != "" {
+			if st, err := os.Stat(p); err == nil && !st.IsDir() {
+				return p
+			}
+		}
+	}
 	py := venvPythonPath(repoRoot)
 	if VenvReady(repoRoot) {
 		return py

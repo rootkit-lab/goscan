@@ -9,6 +9,8 @@ export type FindingDTO = {
   filePath: string;
   scanRunId: string;
   foundAt: string;
+  openedAt?: string;
+  modifiedAt?: string;
   hasCredentials: boolean;
   isNew?: boolean;
 };
@@ -79,6 +81,8 @@ export type BatchCheckOptsDTO = {
   unopenedOnly?: boolean;
   scriptId?: string;
   quick?: boolean;
+  untestedOnly?: boolean;
+  forceRecheck?: boolean;
   limit?: number;
   threads?: number;
 };
@@ -123,6 +127,22 @@ export type SettingsDTO = {
   pointsToDevRepo: boolean;
   needsSetup: boolean;
   version: string;
+  pythonPath: string;
+  pythonPathEffective: string;
+  notifyEnvFound: boolean;
+  notifyScriptOk: boolean;
+  soundEnvFound: boolean;
+  soundScriptOk: boolean;
+};
+
+export type SettingsSaveDTO = {
+  dataDir: string;
+  scanDir: string;
+  pythonPath: string;
+  notifyEnvFound: boolean;
+  notifyScriptOk: boolean;
+  soundEnvFound: boolean;
+  soundScriptOk: boolean;
 };
 
 const S = "main.App";
@@ -152,10 +172,14 @@ export const api = {
   getSettings: () => Call.ByName(`${S}.GetSettings`) as Promise<SettingsDTO>,
   pickDirectory: (title: string, current: string) =>
     Call.ByName(`${S}.PickDirectory`, title, current) as Promise<string>,
-  saveSettings: (dataDir: string, scanDir: string) =>
-    Call.ByName(`${S}.SaveSettings`, dataDir, scanDir) as Promise<void>,
+  pickPythonExecutable: (current: string) =>
+    Call.ByName(`${S}.PickPythonExecutable`, current) as Promise<string>,
+  saveSettings: (opts: SettingsSaveDTO) => Call.ByName(`${S}.SaveSettings`, opts) as Promise<void>,
   openDataDirectory: () => Call.ByName(`${S}.OpenDataDirectory`) as Promise<void>,
-  openScanDirectory: () => Call.ByName(`${S}.OpenScanDirectory`) as Promise<void>
+  openScanDirectory: () => Call.ByName(`${S}.OpenScanDirectory`) as Promise<void>,
+  openEditorWindow: (findingId: number) =>
+    Call.ByName(`${S}.OpenEditorWindow`, findingId) as Promise<void>,
+  focusMainWindow: () => Call.ByName(`${S}.FocusMainWindow`) as Promise<void>
 };
 
 export { Events };

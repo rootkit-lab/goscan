@@ -1,24 +1,31 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActionPanel } from "@/components/actions/ActionPanel";
+import { ScanPanel } from "@/components/actions/ScanPanel";
+import { batchProgressToRow, upsertBatchResult, type BatchResultRow } from "@/components/batch/batchResults";
+import { BatchPanel } from "@/components/batch/BatchPanel";
 import { CommandPalette } from "@/components/command/CommandPalette";
-import { EditorArea } from "@/components/editor/EditorArea";
 import { StatusBar } from "@/components/layout/StatusBar";
 import { WorkbenchLayout } from "@/components/layout/WorkbenchLayout";
+import { SettingsView } from "@/components/settings/SettingsView";
 import { FindingsSidebar } from "@/components/sidebar/FindingsSidebar";
-import { BottomPanel, type BottomTab } from "@/components/terminal/BottomPanel";
-import { useInteractiveTerminal } from "@/hooks/useInteractiveTerminal";
+import { BottomPanel, BATCH_BOTTOM_TABS, type BottomTab } from "@/components/terminal/BottomPanel";
 import {
   api,
   Events,
   type BatchProgressDTO,
   type CheckerResultDTO,
-  type FindingDetailDTO,
   type FindingsStatsDTO,
   type ScanProgressDTO,
   type ScriptCheckerStatusDTO,
   type SettingsDTO
 } from "@/lib/api";
+import {
+  alertEnvFound,
+  alertPrefsFromSettings,
+  alertScriptOk,
+  type AlertPrefs
+} from "@/lib/alerts";
 import { type CheckerResultFilter, findingMatchesCheckerFilter } from "@/lib/checkerFilters";
+import { type WorkbenchView } from "@/lib/workbenchView";
 
 function useDebounce<T>(value: T, ms: number): T {
   const [v, setV] = useState(value);
@@ -55,6 +62,7 @@ function mergeCheckerUpdate(
 }
 
 export function App() {
+  const [workbenchView, setWorkbenchView] = useState<WorkbenchView>("findings");
   const [query, setQuery] = useState("");
   const debouncedQuery = useDebounce(query, 150);
   const [confidence, setConfidence] = useState("");
@@ -63,42 +71,37 @@ export function App() {
   const [findingsStats, setFindingsStats] = useState<FindingsStatsDTO>({ total: 0, unopened: 0 });
   const [findings, setFindings] = useState<Awaited<ReturnType<typeof api.searchFindings>>>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [detail, setDetail] = useState<FindingDetailDTO | null>(null);
-  const [scripts, setScripts] = useState<ScriptCheckerStatusDTO[]>([]);
-  const [selectedScript, setSelectedScript] = useState("");
   const [checkerOverview, setCheckerOverview] = useState<Record<number, ScriptCheckerStatusDTO[]>>({});
   const [runningScript, setRunningScript] = useState<{ findingId: number; scriptId: string } | undefined>();
   const [scanProgress, setScanProgress] = useState<ScanProgressDTO | null>(null);
   const [scanOpts, setScanOpts] = useState({ threads: 50, fast: false, rescan: false, timeoutSec: 8 });
   const [error, setError] = useState("");
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [bottomTab, setBottomTab] = useState<BottomTab>("output");
-  const [outputLines, setOutputLines] = useState<string[]>([]);
-  const [terminalActive, setTerminalActive] = useState(false);
+  const [bottomTab, setBottomTab] = useState<BottomTab>("batch-log");
+  const [batchLogLines, setBatchLogLines] = useState<string[]>([]);
   const [batchRunning, setBatchRunning] = useState(false);
   const [batchProgress, setBatchProgress] = useState<BatchProgressDTO | null>(null);
+  const [batchResults, setBatchResults] = useState<BatchResultRow[]>([]);
   const [batchLogDir, setBatchLogDir] = useState("");
   const [batchThreads, setBatchThreads] = useState(4);
+  const [batchUntestedOnly, setBatchUntestedOnly] = useState(true);
+  const [batchForceRecheck, setBatchForceRecheck] = useState(false);
   const [settings, setSettings] = useState<SettingsDTO | null>(null);
   const [draftDataDir, setDraftDataDir] = useState("");
   const [draftScanDir, setDraftScanDir] = useState("");
+  const [draftPythonPath, setDraftPythonPath] = useState("");
+  const [draftNotifyEnvFound, setDraftNotifyEnvFound] = useState(true);
+  const [draftNotifyScriptOk, setDraftNotifyScriptOk] = useState(true);
+  const [draftSoundEnvFound, setDraftSoundEnvFound] = useState(false);
+  const [draftSoundScriptOk, setDraftSoundScriptOk] = useState(true);
   const [settingsSaving, setSettingsSaving] = useState(false);
 
   const selectedIdRef = useRef(selectedId);
   selectedIdRef.current = selectedId;
+  const alertPrefsRef = useRef<AlertPrefs>(alertPrefsFromSettings({}));
 
-  const termRef = useRef<HTMLDivElement>(null);
-  const { write, reset, focus, fitTerminal } = useInteractiveTerminal(termRef, {
-    enabled: true,
-    onData: (data) => void api.terminalInput(data),
-    onResize: (cols, rows) => {
-      if (bottomTab === "terminal") void api.terminalResize(cols, rows);
-    }
-  });
-
-  const appendOutput = useCallback((line: string) => {
-    setOutputLines((prev) => [...prev, line]);
+  const appendBatchLog = useCallback((line: string) => {
+    setBatchLogLines((prev) => [...prev, line]);
   }, []);
 
   const refreshOverview = useCallback(async (ids: number[]) => {
@@ -117,6 +120,12 @@ export function App() {
       setSettings(s);
       setDraftDataDir(s.dataDir);
       setDraftScanDir(s.scanDir);
+      setDraftPythonPath(s.pythonPath);
+      setDraftNotifyEnvFound(s.notifyEnvFound);
+      setDraftNotifyScriptOk(s.notifyScriptOk);
+      setDraftSoundEnvFound(s.soundEnvFound);
+      setDraftSoundScriptOk(s.soundScriptOk);
+      alertPrefsRef.current = alertPrefsFromSettings(s);
     } catch (e) {
       setError(String(e));
     }
@@ -132,7 +141,7 @@ export function App() {
 
   const loadFindings = useCallback(async () => {
     try {
-      const list = await api.searchFindings(debouncedQuery, confidence, unopenedOnly, 200);
+      const list = await api.searchFindings(debouncedQuery, confidence, unopenedOnly, 500);
       setFindings(list);
       setError("");
       void refreshOverview(list.map((f) => f.id));
@@ -163,48 +172,40 @@ export function App() {
   }, [loadStats]);
 
   useEffect(() => {
-    if (bottomTab === "terminal") {
-      const t = setTimeout(() => fitTerminal(), 100);
-      return () => clearTimeout(t);
-    }
-  }, [bottomTab, fitTerminal]);
-
-  useEffect(() => {
-    const mq = window.matchMedia("(max-width: 1023px)");
-    const apply = () => setSidebarCollapsed(mq.matches);
-    apply();
-    mq.addEventListener("change", apply);
-    return () => mq.removeEventListener("change", apply);
-  }, []);
-
-  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setPaletteOpen(true);
+      }
+      if (e.altKey && !e.ctrlKey && !e.metaKey) {
+        const views: WorkbenchView[] = ["findings", "batch", "settings"];
+        const idx = Number(e.key) - 1;
+        if (idx >= 0 && idx < views.length) {
+          e.preventDefault();
+          setWorkbenchView(views[idx]);
+        }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const selectFinding = async (id: number) => {
+  const openFinding = async (id: number) => {
     setSelectedId(id);
     const wasNew = findings.find((f) => f.id === id)?.isNew;
     if (wasNew) {
       setFindingsStats((prev) => ({ ...prev, unopened: Math.max(0, prev.unopened - 1) }));
       setFindings((prev) =>
-        unopenedOnly ? prev.filter((f) => f.id !== id) : prev.map((f) => (f.id === id ? { ...f, isNew: false } : f))
+        unopenedOnly
+          ? prev.filter((f) => f.id !== id)
+          : prev.map((f) =>
+              f.id === id ? { ...f, isNew: false, openedAt: new Date().toISOString() } : f
+            )
       );
     }
     try {
-      const d = await api.getFinding(id);
-      setDetail(d);
-      const [overview] = await api.checkerOverview([id]);
-      const list = overview?.scripts ?? [];
-      setScripts(list);
-      setCheckerOverview((prev) => ({ ...prev, [id]: list }));
-      setSelectedScript(list[0]?.scriptId ?? "");
+      await api.openEditorWindow(id);
+      setError("");
     } catch (e) {
       setError(String(e));
     }
@@ -215,43 +216,20 @@ export function App() {
       ...prev,
       [dto.findingId]: mergeCheckerUpdate(prev[dto.findingId] ?? [], dto)
     }));
-    if (selectedIdRef.current === dto.findingId) {
-      setScripts((prev) => mergeCheckerUpdate(prev, dto));
-    }
     setRunningScript(undefined);
   }, []);
 
   useEffect(() => {
     const data = (ev: unknown) => (ev as { data?: unknown }).data ?? ev;
 
-    const offOutput = Events.On("scan:output", (ev) => appendOutput(String(data(ev))));
     const offProgress = Events.On("scan:progress", (ev) => {
       const p = data(ev) as ScanProgressDTO;
       setScanProgress(p);
-      if (p.running && p.domainsScanned > 0 && p.domainsScanned % 25 === 0) {
-        appendOutput(`… ${p.domainsScanned} domínios · ${p.vulnsFound} vulns`);
-      }
     });
-    const offFound = Events.On("scan:found", () => void loadFindings());
-
-    const offTermStart = Events.On("terminal:start", (ev) => {
-      const p = data(ev) as { scriptId: string; label?: string; python?: string };
-      setBottomTab("terminal");
-      setTerminalActive(true);
-      reset();
-      const pyLine = p.python ? `\r\n\x1b[90m${p.python}\x1b[0m` : "";
-      write(`\r\n\x1b[1m${p.label ?? p.scriptId}\x1b[0m${pyLine}\r\n`);
-      setTimeout(() => {
-        focus();
-        fitTerminal();
-      }, 50);
-    });
-    const offTermData = Events.On("terminal:data", (ev) => write(String(data(ev))));
-    const offTermExit = Events.On("terminal:exit", (ev) => {
-      const p = data(ev) as { exitCode: number; scriptId: string };
-      write(`\r\n--- exit ${p.scriptId}: code ${p.exitCode} ---\r\n`);
-      setTerminalActive(false);
-      setRunningScript(undefined);
+    const offFound = Events.On("scan:found", (ev) => {
+      const found = data(ev) as { domain?: string; path?: string };
+      alertEnvFound(alertPrefsRef.current, found.domain ?? "", found.path ?? "");
+      void loadFindings();
     });
 
     const offCheckerRunning = Events.On("checker:running", (ev) => {
@@ -263,67 +241,79 @@ export function App() {
         ...prev,
         [p.findingId]: markRunning(prev[p.findingId] ?? [])
       }));
-      if (selectedIdRef.current === p.findingId) {
-        setScripts((prev) => markRunning(prev));
-      }
     });
     const offCheckerUpdated = Events.On("checker:updated", (ev) => {
       const dto = data(ev) as CheckerResultDTO;
       applyCheckerUpdate(dto);
+      if (dto.status === "ok") {
+        const domain = findings.find((f) => f.id === dto.findingId)?.domain ?? `#${dto.findingId}`;
+        alertScriptOk(alertPrefsRef.current, domain, dto.scriptLabel, dto.summary);
+      }
       void refreshOverview([dto.findingId]);
     });
 
     const offBatchOutput = Events.On("batch:output", (ev) => {
-      setBottomTab("output");
-      appendOutput(String(data(ev)));
+      appendBatchLog(String(data(ev)));
     });
     const offBatchProgress = Events.On("batch:progress", (ev) => {
       const p = data(ev) as BatchProgressDTO;
       setBatchRunning(p.running);
-      setBatchProgress(p.running ? p : null);
+      if (p.running) {
+        setBatchProgress(p);
+        if (p.findingId > 0 && p.scriptId) {
+          setBatchResults((prev) =>
+            upsertBatchResult(
+              prev,
+              batchProgressToRow({
+                findingId: p.findingId,
+                domain: p.domain,
+                scriptId: p.scriptId,
+                scriptLabel: p.scriptLabel,
+                status: p.status,
+                summary: p.summary,
+                exitCode: p.exitCode,
+                checkIndex: p.checkIndex
+              })
+            )
+          );
+        }
+      } else {
+        setBatchProgress((prev) => (prev ? { ...prev, running: false } : null));
+      }
     });
     const offBatchDone = Events.On("batch:done", (ev) => {
       setBatchRunning(false);
-      setBatchProgress(null);
       void refreshOverview(findings.map((f) => f.id));
       const d = data(ev) as { ok: number; fail: number; skip: number; total: number; secs: number; logDir?: string };
       if (d.logDir) setBatchLogDir(d.logDir);
-      appendOutput(`Batch concluído — OK ${d.ok} · FAIL ${d.fail} · SKIP ${d.skip} · ${d.secs}s`);
+      appendBatchLog(`Batch concluído — OK ${d.ok} · FAIL ${d.fail} · SKIP ${d.skip} · ${d.secs}s`);
+      setBatchProgress((prev) =>
+        prev
+          ? {
+              ...prev,
+              running: false,
+              okCount: d.ok,
+              failCount: d.fail,
+              skipCount: d.skip,
+              checkIndex: d.total || prev.checkIndex,
+              checkTotal: d.total || prev.checkTotal
+            }
+          : null
+      );
     });
 
     return () => {
-      offOutput();
       offProgress();
       offFound();
-      offTermStart();
-      offTermData();
-      offTermExit();
       offCheckerRunning();
       offCheckerUpdated();
       offBatchOutput();
       offBatchProgress();
       offBatchDone();
     };
-  }, [appendOutput, loadFindings, write, reset, focus, fitTerminal, applyCheckerUpdate, refreshOverview, findings]);
-
-  const runScript = async (scriptId?: string) => {
-    const sid = scriptId ?? selectedScript;
-    if (!selectedId || !sid) return;
-    setSelectedScript(sid);
-    const row = scripts.find((s) => s.scriptId === sid);
-    try {
-      if (row?.status !== "running") {
-        setBottomTab("terminal");
-      }
-      await api.runScript(sid, selectedId);
-    } catch (e) {
-      setError(String(e));
-      setRunningScript(undefined);
-    }
-  };
+  }, [appendBatchLog, loadFindings, applyCheckerUpdate, refreshOverview, findings]);
 
   const startScan = async () => {
-    setBottomTab("output");
     try {
       await api.startScan({ ...scanOpts, dir: draftScanDir || settings?.scanDir || undefined });
     } catch (e) {
@@ -351,11 +341,29 @@ export function App() {
     }
   };
 
+  const pickPython = async () => {
+    try {
+      const picked = await api.pickPythonExecutable(draftPythonPath || settings?.pythonPathEffective || "");
+      setDraftPythonPath(picked);
+    } catch (e) {
+      const msg = String(e);
+      if (!msg.includes("cancel") && !msg.includes("nenhum")) setError(msg);
+    }
+  };
+
   const saveSettings = async () => {
     setSettingsSaving(true);
     setError("");
     try {
-      await api.saveSettings(draftDataDir, draftScanDir);
+      await api.saveSettings({
+        dataDir: draftDataDir,
+        scanDir: draftScanDir,
+        pythonPath: draftPythonPath,
+        notifyEnvFound: draftNotifyEnvFound,
+        notifyScriptOk: draftNotifyScriptOk,
+        soundEnvFound: draftSoundEnvFound,
+        soundScriptOk: draftSoundScriptOk
+      });
       await loadSettings();
       await loadFindings();
       await loadStats();
@@ -367,9 +375,12 @@ export function App() {
   };
 
   const startBatch = async (opts: { findingOnly?: boolean; quick?: boolean; threads?: number }) => {
-    setBottomTab("output");
+    setWorkbenchView("batch");
     setError("");
     setBatchLogDir("");
+    setBatchLogLines([]);
+    setBatchResults([]);
+    setBatchProgress(null);
     const threads = opts.threads ?? 1;
     try {
       await api.startBatchCheck({
@@ -378,6 +389,8 @@ export function App() {
         confidence,
         unopenedOnly: opts.findingOnly ? false : unopenedOnly,
         quick: opts.quick ?? false,
+        untestedOnly: batchUntestedOnly && !batchForceRecheck,
+        forceRecheck: batchForceRecheck,
         limit: opts.findingOnly ? 1 : 500,
         threads
       });
@@ -394,92 +407,164 @@ export function App() {
     ? `${scanProgress.domainsScanned} dom · ${scanProgress.vulnsFound} vulns`
     : undefined;
 
-  const panelRunningId = runningScript?.findingId === selectedId ? runningScript.scriptId : undefined;
+  const panelRunningId = runningScript?.scriptId;
+  const scanRunning = !!scanProgress?.running;
+  const selectedFinding = selectedId ? findings.find((f) => f.id === selectedId) : undefined;
+
+  const listProps = {
+    query,
+    onQueryChange: setQuery,
+    confidence,
+    onConfidenceChange: setConfidence,
+    unopenedOnly,
+    onUnopenedOnlyChange: setUnopenedOnly,
+    unopenedCount: findingsStats.unopened,
+    checkerFilter,
+    onCheckerFilterChange: setCheckerFilter,
+    findings: displayedFindings,
+    findingIdsForCounts: findings.map((f) => f.id),
+    selectedId,
+    onSelect: setSelectedId,
+    onOpen: (id: number) => void openFinding(id),
+    checkerOverview,
+    runningScript
+  };
+
+  const mainContent = (() => {
+    if (workbenchView === "batch") {
+      return (
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <BatchPanel
+          batchThreads={batchThreads}
+          onBatchThreadsChange={setBatchThreads}
+          batchUntestedOnly={batchUntestedOnly}
+          onBatchUntestedOnlyChange={(v) => {
+            setBatchUntestedOnly(v);
+            if (v) setBatchForceRecheck(false);
+          }}
+          batchForceRecheck={batchForceRecheck}
+          onBatchForceRecheckChange={(v) => {
+            setBatchForceRecheck(v);
+            if (v) setBatchUntestedOnly(false);
+          }}
+          onTestAllFinding={() => void startBatch({ findingOnly: true })}
+          onTestAllFiltered={() => void startBatch({ findingOnly: false })}
+          onTestAllQuick={() => void startBatch({ findingOnly: false, quick: true })}
+          onTestAllEnvs={() => void startBatch({ findingOnly: false, threads: batchThreads })}
+          onCancelBatch={() => void api.cancelBatchCheck()}
+          batchRunning={batchRunning}
+          batchProgress={batchProgress}
+          batchResults={batchResults}
+          batchLogDir={batchLogDir}
+          onOpenBatchLogs={() => void api.openBatchLogDir(batchLogDir)}
+          batchLogLines={batchLogLines}
+          onClearBatchLog={() => setBatchLogLines([])}
+          onOpenFinding={(id) => void openFinding(id)}
+          filterSummary={{
+            count: displayedFindings.length,
+            confidence,
+            query: debouncedQuery,
+            unopenedOnly,
+            checkerFilter
+          }}
+          hasSelectedFinding={!!selectedId}
+          runningScript={!!panelRunningId}
+          />
+        </div>
+      );
+    }
+
+    if (workbenchView === "settings") {
+      return (
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <SettingsView
+            settings={settings}
+            draftDataDir={draftDataDir}
+            draftScanDir={draftScanDir}
+            draftPythonPath={draftPythonPath}
+            draftNotifyEnvFound={draftNotifyEnvFound}
+            draftNotifyScriptOk={draftNotifyScriptOk}
+            draftSoundEnvFound={draftSoundEnvFound}
+            draftSoundScriptOk={draftSoundScriptOk}
+            onDraftDataDirChange={setDraftDataDir}
+            onDraftScanDirChange={setDraftScanDir}
+            onDraftPythonPathChange={setDraftPythonPath}
+            onDraftNotifyEnvFoundChange={setDraftNotifyEnvFound}
+            onDraftNotifyScriptOkChange={setDraftNotifyScriptOk}
+            onDraftSoundEnvFoundChange={setDraftSoundEnvFound}
+            onDraftSoundScriptOkChange={setDraftSoundScriptOk}
+            onPickDataDir={() => void pickDataDir()}
+            onPickScanDir={() => void pickScanDir()}
+            onPickPython={() => void pickPython()}
+            onSave={() => void saveSettings()}
+            onOpenDataDir={() => void api.openDataDirectory()}
+            onOpenScanDir={() => void api.openScanDirectory()}
+            saving={settingsSaving}
+          />
+        </div>
+      );
+    }
+
+    if (workbenchView === "findings") {
+      return (
+        <div className="flex min-h-0 min-w-0 flex-1">
+          <div className="flex min-w-0 flex-1 flex-col">
+            <FindingsSidebar {...listProps} />
+          </div>
+          <aside className="w-[300px] shrink-0">
+            <ScanPanel
+              scanOpts={scanOpts}
+              onScanOptsChange={setScanOpts}
+              onStartScan={() => void startScan()}
+              onCancelScan={() => void api.cancelScan()}
+              scanRunning={scanRunning}
+              scanProgress={scanProgress}
+              scanDir={draftScanDir || settings?.scanDir}
+            />
+          </aside>
+        </div>
+      );
+    }
+
+    return null;
+  })();
+
+  const showBatchLog = batchRunning && workbenchView === "findings";
 
   return (
     <>
       <WorkbenchLayout
-        sidebarCollapsed={sidebarCollapsed}
-        sidebar={
-          <FindingsSidebar
-            query={query}
-            onQueryChange={setQuery}
-            confidence={confidence}
-            onConfidenceChange={setConfidence}
-            unopenedOnly={unopenedOnly}
-            onUnopenedOnlyChange={setUnopenedOnly}
-            unopenedCount={findingsStats.unopened}
-            checkerFilter={checkerFilter}
-            onCheckerFilterChange={setCheckerFilter}
-            findings={displayedFindings}
-            findingIdsForCounts={findings.map((f) => f.id)}
-            selectedId={selectedId}
-            onSelect={(id) => void selectFinding(id)}
-            checkerOverview={checkerOverview}
-            runningScript={runningScript}
-          />
-        }
-        editor={<EditorArea detail={detail} />}
-        actions={
-          <ActionPanel
-            scripts={scripts}
-            selectedScript={selectedScript}
-            onScriptChange={setSelectedScript}
-            onRunScript={(id) => void runScript(id)}
-            scanOpts={scanOpts}
-            onScanOptsChange={setScanOpts}
-            onStartScan={() => void startScan()}
-            onCancelScan={() => void api.cancelScan()}
-            onCancelScript={() => void api.cancelScript()}
-            onTestAllFinding={() => void startBatch({ findingOnly: true })}
-            onTestAllFiltered={() => void startBatch({ findingOnly: false })}
-            onTestAllQuick={() => void startBatch({ findingOnly: false, quick: true })}
-            onTestAllEnvs={() => void startBatch({ findingOnly: false, threads: batchThreads })}
-            onCancelBatch={() => void api.cancelBatchCheck()}
-            batchRunning={batchRunning}
-            batchProgress={batchProgress}
-            batchLabel={batchLabel}
-            batchThreads={batchThreads}
-            onBatchThreadsChange={setBatchThreads}
-            terminalActive={terminalActive}
-            runningScriptId={panelRunningId}
-            settings={settings}
-            draftDataDir={draftDataDir}
-            draftScanDir={draftScanDir}
-            onDraftDataDirChange={setDraftDataDir}
-            onDraftScanDirChange={setDraftScanDir}
-            onPickDataDir={() => void pickDataDir()}
-            onPickScanDir={() => void pickScanDir()}
-            onSaveSettings={() => void saveSettings()}
-            onOpenDataDir={() => void api.openDataDirectory()}
-            onOpenScanDir={() => void api.openScanDirectory()}
-            settingsSaving={settingsSaving}
-          />
-        }
+        view={workbenchView}
+        onViewChange={setWorkbenchView}
+        batchActive={batchRunning}
+        main={mainContent}
         terminal={
-          <BottomPanel
-            tab={bottomTab}
-            onTabChange={setBottomTab}
-            outputLines={outputLines}
-            onClearOutput={() => setOutputLines([])}
-            termRef={termRef}
-            onClearTerminal={reset}
-            terminalActive={terminalActive}
-            batchRunning={batchRunning}
-            batchProgress={batchProgress}
-            batchLogDir={batchLogDir}
-            onOpenBatchLogs={() => void api.openBatchLogDir(batchLogDir)}
-          />
+          showBatchLog ? (
+            <BottomPanel
+              tabs={BATCH_BOTTOM_TABS}
+              tab={bottomTab}
+              onTabChange={setBottomTab}
+              outputLines={[]}
+              batchLogLines={batchLogLines}
+              onClearOutput={() => {}}
+              onClearBatchLog={() => setBatchLogLines([])}
+              batchLogDir={batchLogDir}
+              onOpenBatchLogs={() => void api.openBatchLogDir(batchLogDir)}
+              defaultHeight={200}
+            />
+          ) : null
         }
         statusBar={
           <StatusBar
-            findingLabel={detail ? `${detail.domain}${detail.path}` : undefined}
+            findingLabel={
+              selectedFinding ? `${selectedFinding.domain}${selectedFinding.path}` : undefined
+            }
             findingsCount={displayedFindings.length}
             unopenedCount={findingsStats.unopened}
             unopenedFilter={unopenedOnly}
             checkerFilter={checkerFilter}
-            scanRunning={scanProgress?.running || batchRunning}
-            scanStats={batchRunning ? batchLabel : scanStats}
+            scanRunning={scanRunning || batchRunning}
+            scanStats={batchRunning || batchProgress ? batchLabel : scanStats}
             error={error}
             mode={settings?.mode}
             dataDir={settings?.dataDir}
@@ -492,11 +577,11 @@ export function App() {
         query={query}
         onQueryChange={setQuery}
         findings={findings}
-        onSelectFinding={(id) => void selectFinding(id)}
-        onRunScript={() => void runScript()}
+        onSelectFinding={(id) => void openFinding(id)}
         onStartScan={() => void startScan()}
         onTestAllFinding={() => void startBatch({ findingOnly: true })}
         onTestAllFiltered={() => void startBatch({ findingOnly: false })}
+        onViewChange={setWorkbenchView}
       />
     </>
   );

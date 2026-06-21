@@ -52,6 +52,8 @@ type FindingDTO struct {
 	FilePath       string `json:"filePath"`
 	ScanRunID      string `json:"scanRunId"`
 	FoundAt        string `json:"foundAt"`
+	OpenedAt       string `json:"openedAt"`
+	ModifiedAt     string `json:"modifiedAt"`
 	HasCredentials bool   `json:"hasCredentials"`
 	IsNew          bool   `json:"isNew"`
 }
@@ -117,14 +119,16 @@ type FindingCheckerOverviewDTO struct {
 }
 
 type BatchCheckOptsDTO struct {
-	FindingID    int64  `json:"findingId"`
-	Query        string `json:"query"`
-	Confidence   string `json:"confidence"`
-	UnopenedOnly bool   `json:"unopenedOnly"`
-	ScriptID     string `json:"scriptId"`
-	Quick        bool   `json:"quick"`
-	Limit        int    `json:"limit"`
-	Threads      int    `json:"threads"`
+	FindingID     int64  `json:"findingId"`
+	Query         string `json:"query"`
+	Confidence    string `json:"confidence"`
+	UnopenedOnly  bool   `json:"unopenedOnly"`
+	ScriptID      string `json:"scriptId"`
+	Quick         bool   `json:"quick"`
+	UntestedOnly  bool   `json:"untestedOnly"`
+	ForceRecheck  bool   `json:"forceRecheck"`
+	Limit         int    `json:"limit"`
+	Threads       int    `json:"threads"`
 }
 
 type BatchProgressDTO struct {
@@ -160,14 +164,30 @@ type BatchDoneDTO struct {
 }
 
 type SettingsDTO struct {
-	Mode               string `json:"mode"`
-	DataDir            string `json:"dataDir"`
-	ScanDir            string `json:"scanDir"`
-	AppRoot            string `json:"appRoot"`
-	DefaultProdDataDir string `json:"defaultProdDataDir"`
-	PointsToDevRepo    bool   `json:"pointsToDevRepo"`
-	NeedsSetup         bool   `json:"needsSetup"`
-	Version            string `json:"version"`
+	Mode                string `json:"mode"`
+	DataDir             string `json:"dataDir"`
+	ScanDir             string `json:"scanDir"`
+	AppRoot             string `json:"appRoot"`
+	DefaultProdDataDir  string `json:"defaultProdDataDir"`
+	PointsToDevRepo      bool   `json:"pointsToDevRepo"`
+	NeedsSetup          bool   `json:"needsSetup"`
+	Version             string `json:"version"`
+	PythonPath          string `json:"pythonPath"`
+	PythonPathEffective string `json:"pythonPathEffective"`
+	NotifyEnvFound      bool   `json:"notifyEnvFound"`
+	NotifyScriptOk      bool   `json:"notifyScriptOk"`
+	SoundEnvFound       bool   `json:"soundEnvFound"`
+	SoundScriptOk       bool   `json:"soundScriptOk"`
+}
+
+type SettingsSaveDTO struct {
+	DataDir        string `json:"dataDir"`
+	ScanDir        string `json:"scanDir"`
+	PythonPath     string `json:"pythonPath"`
+	NotifyEnvFound bool   `json:"notifyEnvFound"`
+	NotifyScriptOk bool   `json:"notifyScriptOk"`
+	SoundEnvFound  bool   `json:"soundEnvFound"`
+	SoundScriptOk  bool   `json:"soundScriptOk"`
 }
 
 type activeScriptRun struct {
@@ -253,15 +273,26 @@ func (a *App) GetSettings() SettingsDTO {
 	mode := paths.Mode()
 	version := paths.InstallVersion(a.repoRoot)
 	defProd, _ := paths.DefaultProdDataRoot()
+	user, _ := settings.Load()
+	notifyEnv := user.NotifyEnvFoundOrDefault()
+	notifyOk := user.NotifyScriptOkOrDefault()
+	soundEnv := user.SoundEnvFoundOrDefault()
+	soundOk := user.SoundScriptOkOrDefault()
 	return SettingsDTO{
-		Mode:               mode,
-		DataDir:            a.dataRoot,
-		ScanDir:            a.scanDir,
-		AppRoot:            a.repoRoot,
-		DefaultProdDataDir: defProd,
-		PointsToDevRepo:    paths.IsDevRepoPath(a.dataRoot) || paths.IsDevRepoPath(a.scanDir),
-		NeedsSetup:         paths.ProdNeedsSetup(),
-		Version:            version,
+		Mode:                mode,
+		DataDir:             a.dataRoot,
+		ScanDir:             a.scanDir,
+		AppRoot:             a.repoRoot,
+		DefaultProdDataDir:  defProd,
+		PointsToDevRepo:     paths.IsDevRepoPath(a.dataRoot) || paths.IsDevRepoPath(a.scanDir),
+		NeedsSetup:          paths.ProdNeedsSetup(),
+		Version:             version,
+		PythonPath:          user.PythonPath,
+		PythonPathEffective: scripts.PythonExecutable(a.repoRoot),
+		NotifyEnvFound:      notifyEnv,
+		NotifyScriptOk:      notifyOk,
+		SoundEnvFound:       soundEnv,
+		SoundScriptOk:       soundOk,
 	}
 }
 
@@ -291,11 +322,65 @@ func (a *App) PickDirectory(title, current string) (string, error) {
 	return filepath.Clean(path), nil
 }
 
-func (a *App) SaveSettings(dataDir, scanDir string) error {
-	dataDir = strings.TrimSpace(dataDir)
-	scanDir = strings.TrimSpace(scanDir)
+func (a *App) PickPythonExecutable(current string) (string, error) {
+	if a.wails == nil {
+		return "", fmt.Errorf("interface ainda não pronta")
+	}
+	start := current
+	if start == "" {
+		start = filepath.Join(a.repoRoot, "scripts", ".venv", "bin")
+		if st, err := os.Stat(start); err != nil || !st.IsDir() {
+			if home, err := os.UserHomeDir(); err == nil {
+				start = home
+			}
+		}
+	} else {
+		start = filepath.Dir(start)
+	}
+	dlg := a.wails.Dialog.OpenFile().
+		SetTitle("Executável Python").
+		SetDirectory(start).
+		CanChooseFiles(true).
+		CanChooseDirectories(false)
+	path, err := dlg.PromptForSingleSelection()
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(path) == "" {
+		return "", fmt.Errorf("nenhum ficheiro seleccionado")
+	}
+	path = filepath.Clean(path)
+	if err := validatePythonExecutable(path); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func validatePythonExecutable(path string) error {
+	st, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("python: %w", err)
+	}
+	if st.IsDir() {
+		return fmt.Errorf("python: é uma pasta")
+	}
+	if runtime.GOOS != "windows" && st.Mode()&0111 == 0 {
+		return fmt.Errorf("python: ficheiro não executável")
+	}
+	return nil
+}
+
+func (a *App) SaveSettings(opts SettingsSaveDTO) error {
+	dataDir := strings.TrimSpace(opts.DataDir)
+	scanDir := strings.TrimSpace(opts.ScanDir)
+	pythonPath := strings.TrimSpace(opts.PythonPath)
 	if dataDir == "" {
 		return fmt.Errorf("escolha a pasta de dados")
+	}
+	if pythonPath != "" {
+		if err := validatePythonExecutable(pythonPath); err != nil {
+			return err
+		}
 	}
 	absData, err := filepath.Abs(dataDir)
 	if err != nil {
@@ -324,7 +409,11 @@ func (a *App) SaveSettings(dataDir, scanDir string) error {
 	if paths.Mode() == paths.ModeProd && paths.IsDevRepoPath(absScan) {
 		return fmt.Errorf("pasta de scan não pode ser o repo de dev")
 	}
-	if err := settings.Save(settings.User{DataDir: absData, ScanDir: absScan}); err != nil {
+	ne, ns, se, ss := opts.NotifyEnvFound, opts.NotifyScriptOk, opts.SoundEnvFound, opts.SoundScriptOk
+	if err := settings.Save(settings.User{
+		DataDir: absData, ScanDir: absScan, PythonPath: pythonPath,
+		NotifyEnvFound: &ne, NotifyScriptOk: &ns, SoundEnvFound: &se, SoundScriptOk: &ss,
+	}); err != nil {
 		return err
 	}
 	return a.reloadStores()
@@ -344,13 +433,34 @@ func (a *App) emit(event string, data any) {
 	}
 }
 
+func (a *App) emitForFinding(findingID int64, event string, data any) {
+	if a.wails == nil {
+		return
+	}
+	name := fmt.Sprintf("editor-%d", findingID)
+	if w, ok := a.wails.Window.GetByName(name); ok {
+		w.EmitEvent(event, data)
+		return
+	}
+	a.emit(event, data)
+}
+
 func toFindingDTO(f store.Finding) FindingDTO {
 	return FindingDTO{
 		ID: f.ID, Domain: f.Domain, Path: f.Path, URL: f.URL,
 		Confidence: f.Confidence, FilePath: f.FilePath, ScanRunID: f.ScanRunID,
-		FoundAt: f.FoundAt, HasCredentials: f.HasCredentials,
+		FoundAt: f.FoundAt, OpenedAt: f.OpenedAt, HasCredentials: f.HasCredentials,
 		IsNew: f.OpenedAt == "",
 	}
+}
+
+func (a *App) enrichFindingDTO(f store.Finding) FindingDTO {
+	dto := toFindingDTO(f)
+	abs := filepath.Join(a.findingsDir, "by-domain", f.FilePath)
+	if st, err := os.Stat(abs); err == nil {
+		dto.ModifiedAt = st.ModTime().UTC().Format(time.RFC3339)
+	}
+	return dto
 }
 
 func (a *App) FindingsStats() (FindingsStatsDTO, error) {
@@ -373,7 +483,7 @@ func (a *App) SearchFindings(query, confidence string, unopenedOnly bool, limit 
 	}
 	out := make([]FindingDTO, len(items))
 	for i, f := range items {
-		out[i] = toFindingDTO(f)
+		out[i] = a.enrichFindingDTO(f)
 	}
 	return out, nil
 }
@@ -391,6 +501,45 @@ func (a *App) GetFinding(id int64) (FindingDetailDTO, error) {
 		Content:    content,
 		AbsPath:    abs,
 	}, nil
+}
+
+func (a *App) OpenEditorWindow(findingID int64) error {
+	if a.wails == nil {
+		return fmt.Errorf("app not ready")
+	}
+	name := fmt.Sprintf("editor-%d", findingID)
+	if existing, ok := a.wails.Window.GetByName(name); ok {
+		existing.Show()
+		existing.Focus()
+		return nil
+	}
+	f, _, err := a.findings.Get(findingID)
+	if err != nil {
+		return err
+	}
+	_ = a.findings.MarkOpened(findingID)
+	title := fmt.Sprintf("%s%s — goscan", f.Domain, f.Path)
+	a.wails.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name:      name,
+		Title:     title,
+		Width:     1100,
+		Height:    800,
+		MinWidth:  800,
+		MinHeight: 500,
+		URL:       fmt.Sprintf("/?window=editor&findingId=%d", findingID),
+	})
+	return nil
+}
+
+func (a *App) FocusMainWindow() error {
+	if a.wails == nil {
+		return fmt.Errorf("app not ready")
+	}
+	if w, ok := a.wails.Window.GetByName("main"); ok {
+		w.Show()
+		w.Focus()
+	}
+	return nil
 }
 
 func (a *App) ListScripts() ([]ScriptDTO, error) {
@@ -487,7 +636,7 @@ func (a *App) beginScriptRun(findingID int64, scriptID string) {
 	a.scriptMu.Lock()
 	a.scriptRunActive = &activeScriptRun{findingID: findingID, scriptID: scriptID}
 	a.scriptMu.Unlock()
-	a.emit("checker:running", map[string]any{"findingId": findingID, "scriptId": scriptID})
+	a.emitForFinding(findingID, "checker:running", map[string]any{"findingId": findingID, "scriptId": scriptID})
 }
 
 func (a *App) appendScriptOutput(chunk string) {
@@ -520,14 +669,47 @@ func (a *App) finishScriptRun(scriptID string, exitCode int) {
 		FindingID: run.findingID, ScriptID: scriptID, ScriptLabel: a.scriptLabel(scriptID),
 		Status: status, ExitCode: exitCode, Summary: summary, TestedAt: time.Now().UTC().Format(time.RFC3339),
 	}
+	a.emitForFinding(run.findingID, "checker:updated", dto)
 	a.emit("checker:updated", dto)
+}
+
+func enrichWithFindingID(data any, findingID int64) any {
+	switch v := data.(type) {
+	case map[string]string:
+		m := make(map[string]any, len(v)+1)
+		for k, val := range v {
+			m[k] = val
+		}
+		m["findingId"] = findingID
+		return m
+	case map[string]any:
+		m := make(map[string]any, len(v)+1)
+		for k, val := range v {
+			m[k] = val
+		}
+		m["findingId"] = findingID
+		return m
+	case string:
+		return map[string]any{"findingId": findingID, "chunk": v}
+	default:
+		return map[string]any{"findingId": findingID, "payload": data}
+	}
+}
+
+func isScriptStreamEvent(event string) bool {
+	switch event {
+	case "terminal:start", "terminal:data", "terminal:exit", "script:stdout", "script:stderr", "script:exit":
+		return true
+	default:
+		return false
+	}
 }
 
 func (a *App) wrapScriptEmit(findingID int64, scriptID string, base func(string, any)) scripts.EventEmitter {
 	a.beginScriptRun(findingID, scriptID)
 	return func(event string, data any) {
 		switch event {
-		case "terminal:data":
+		case "terminal:data", "script:stdout", "script:stderr":
 			a.appendScriptOutput(fmt.Sprint(data))
 		case "terminal:exit", "script:exit":
 			code := 0
@@ -543,7 +725,11 @@ func (a *App) wrapScriptEmit(findingID int64, scriptID string, base func(string,
 			}
 			a.finishScriptRun(scriptID, code)
 		}
-		base(event, data)
+		if isScriptStreamEvent(event) {
+			base(event, enrichWithFindingID(data, findingID))
+		} else {
+			base(event, data)
+		}
 	}
 }
 
@@ -552,17 +738,12 @@ func (a *App) RunScript(scriptID string, findingID int64) error {
 	if err != nil {
 		return err
 	}
-	s, err := a.scriptRun.Find(scriptID)
-	if err != nil {
+	if _, err := a.scriptRun.Find(scriptID); err != nil {
 		return err
 	}
-	emit := a.wrapScriptEmit(findingID, scriptID, func(event string, data any) { a.emit(event, data) })
+	emit := a.wrapScriptEmit(findingID, scriptID, func(event string, data any) { a.emitForFinding(findingID, event, data) })
 	go func() {
-		if s.Interactive {
-			a.scriptRun.RunInteractive(context.Background(), scriptID, detail.AbsPath, emit)
-		} else {
-			a.scriptRun.Run(context.Background(), scriptID, detail.AbsPath, emit, 30*time.Second)
-		}
+		a.scriptRun.RunBatch(context.Background(), scriptID, detail.AbsPath, emit)
 	}()
 	return nil
 }
@@ -653,7 +834,34 @@ func (a *App) StartBatchCheck(opts BatchCheckOptsDTO) error {
 			return
 		}
 
-		a.emit("batch:output", fmt.Sprintf("Batch start — %d findings · %d checks · %d threads", len(findings), len(items), batchThreads(opts.Threads)))
+		if opts.UntestedOnly && !opts.ForceRecheck {
+			findingIDs := batchFindingIDs(items)
+			tested, e := a.checkers.ListByFindings(findingIDs)
+			if e != nil {
+				a.emit("batch:output", fmt.Sprintf("Erro: %v", e))
+				a.emit("batch:done", BatchDoneDTO{})
+				return
+			}
+			before := len(items)
+			items = filterUntestedBatchItems(items, tested)
+			if skipped := before - len(items); skipped > 0 {
+				a.emit("batch:output", fmt.Sprintf("Ignorados %d checks já testados", skipped))
+			}
+		}
+
+		if len(items) == 0 {
+			a.emit("batch:output", "Nenhum checker por testar (todos já testados).")
+			a.emit("batch:done", BatchDoneDTO{})
+			return
+		}
+
+		modeLabel := ""
+		if opts.ForceRecheck {
+			modeLabel = " · recheck forçado"
+		} else if opts.UntestedOnly {
+			modeLabel = " · só por testar"
+		}
+		a.emit("batch:output", fmt.Sprintf("Batch start — %d findings · %d checks · %d threads%s", len(findings), len(items), batchThreads(opts.Threads), modeLabel))
 		a.emit("batch:progress", BatchProgressDTO{
 			Running: true, Line: "A iniciar…", CheckTotal: len(items), Threads: batchThreads(opts.Threads),
 		})
@@ -669,6 +877,7 @@ func (a *App) StartBatchCheck(opts BatchCheckOptsDTO) error {
 			ManifestOpts: batchlog.ManifestOpts{
 				Quick: opts.Quick, Limit: opts.Limit, ScriptID: opts.ScriptID,
 				FindingID: opts.FindingID, UnopenedOnly: opts.UnopenedOnly,
+				UntestedOnly: opts.UntestedOnly, ForceRecheck: opts.ForceRecheck,
 			},
 		}); err != nil {
 			a.emit("batch:output", fmt.Sprintf("⚠ logs: %v", err))
@@ -734,6 +943,35 @@ func batchThreads(n int) int {
 		return 16
 	}
 	return n
+}
+
+func batchFindingIDs(items []scripts.BatchItem) []int64 {
+	seen := map[int64]bool{}
+	var ids []int64
+	for _, it := range items {
+		if !seen[it.FindingID] {
+			seen[it.FindingID] = true
+			ids = append(ids, it.FindingID)
+		}
+	}
+	return ids
+}
+
+func filterUntestedBatchItems(items []scripts.BatchItem, tested map[int64][]store.CheckerResult) []scripts.BatchItem {
+	pairs := map[string]bool{}
+	for fid, results := range tested {
+		for _, r := range results {
+			pairs[fmt.Sprintf("%d:%s", fid, r.ScriptID)] = true
+		}
+	}
+	out := make([]scripts.BatchItem, 0, len(items))
+	for _, it := range items {
+		key := fmt.Sprintf("%d:%s", it.FindingID, it.Script.ID)
+		if !pairs[key] {
+			out = append(out, it)
+		}
+	}
+	return out
 }
 
 func (a *App) CancelBatchCheck() {

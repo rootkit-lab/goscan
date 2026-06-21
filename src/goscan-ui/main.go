@@ -31,6 +31,7 @@ func main() {
 	appBindings.wails = mainApp
 
 	mainApp.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name:      "main",
 		Title:     "goscan",
 		Width:     1400,
 		Height:    900,

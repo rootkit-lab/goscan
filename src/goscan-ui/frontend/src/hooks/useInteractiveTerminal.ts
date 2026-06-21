@@ -5,6 +5,7 @@ import "@xterm/xterm/css/xterm.css";
 
 type Options = {
   enabled: boolean;
+  readOnly?: boolean;
   onData?: (data: string) => void;
   onResize?: (cols: number, rows: number) => void;
 };
@@ -21,9 +22,11 @@ export function useInteractiveTerminal(containerRef: React.RefObject<HTMLDivElem
   useEffect(() => {
     if (!opts.enabled || !containerRef.current) return;
 
+    const readOnly = opts.readOnly ?? false;
     const term = new Terminal({
       convertEol: true,
-      cursorBlink: true,
+      cursorBlink: !readOnly,
+      disableStdin: readOnly,
       fontSize: 12,
       fontFamily: "var(--vscode-font-mono)",
       theme: {
@@ -46,7 +49,9 @@ export function useInteractiveTerminal(containerRef: React.RefObject<HTMLDivElem
       onResizeRef.current?.(term.cols, term.rows);
     };
 
-    term.onData((data) => onDataRef.current?.(data));
+    if (!readOnly) {
+      term.onData((data) => onDataRef.current?.(data));
+    }
 
     const ro = new ResizeObserver(() => notifySize());
     ro.observe(containerRef.current);
@@ -58,7 +63,7 @@ export function useInteractiveTerminal(containerRef: React.RefObject<HTMLDivElem
       termRef.current = null;
       fitRef.current = null;
     };
-  }, [opts.enabled, containerRef]);
+  }, [opts.enabled, opts.readOnly, containerRef]);
 
   const write = useCallback((data: string) => {
     termRef.current?.write(data);

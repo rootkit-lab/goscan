@@ -1,5 +1,6 @@
-import { Key, Search, Sparkles } from "lucide-react";
-import { FindingCheckerStrip } from "@/components/sidebar/FindingCheckerStrip";
+import { Filter, Search, Sparkles } from "lucide-react";
+import { clsx } from "clsx";
+import { FindingsTable } from "@/components/findings/FindingsTable";
 import type { FindingDTO, ScriptCheckerStatusDTO } from "@/lib/api";
 import {
   CHECKER_FILTER_OPTIONS,
@@ -8,10 +9,10 @@ import {
 } from "@/lib/checkerFilters";
 
 const CONFIDENCE_OPTIONS = [
-  { value: "", label: "All" },
+  { value: "", label: "Todos" },
   { value: "HIGH", label: "HIGH" },
-  { value: "MEDIUM", label: "MEDIUM" }
-];
+  { value: "MEDIUM", label: "MED" }
+] as const;
 
 type Props = {
   query: string;
@@ -27,6 +28,7 @@ type Props = {
   findingIdsForCounts: number[];
   selectedId: number | null;
   onSelect: (id: number) => void;
+  onOpen: (id: number) => void;
   checkerOverview: Record<number, ScriptCheckerStatusDTO[]>;
   runningScript?: { findingId: number; scriptId: string };
 };
@@ -45,140 +47,130 @@ export function FindingsSidebar({
   findingIdsForCounts,
   selectedId,
   onSelect,
+  onOpen,
   checkerOverview,
   runningScript
 }: Props) {
+  const totalCount = findingIdsForCounts.length;
+  const hasActiveFilters = !!checkerFilter || unopenedOnly || !!confidence || !!query;
+
   return (
-    <div className="flex h-full flex-col">
-      <div className="border-b border-vscode-border px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-vscode-muted">
-        Explorer
-      </div>
-      <div className="space-y-2 border-b border-vscode-border p-2">
+    <div className="flex h-full flex-col bg-gs-bg">
+      <div className="shrink-0 border-b border-gs-border px-4 py-3">
+        <div className="mb-3 flex items-end justify-between gap-3">
+          <div>
+            <h1 className="text-[15px] font-semibold tracking-tight text-gs-fg">Findings</h1>
+            <p className="mt-0.5 text-[11px] text-gs-muted">
+              {findings.length === totalCount
+                ? `${totalCount} resultados`
+                : `${findings.length} de ${totalCount} resultados`}
+              {hasActiveFilters ? " · filtrado" : ""}
+            </p>
+          </div>
+          {unopenedCount > 0 && (
+            <span className="shrink-0 rounded-full bg-sky-500/15 px-2 py-0.5 text-[10px] font-medium text-sky-300">
+              {unopenedCount} novos
+            </span>
+          )}
+        </div>
+
         <div className="relative">
-          <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-vscode-muted" />
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gs-muted" />
           <input
-            className="vscode-input pl-7"
-            placeholder="Search findings (Ctrl+K)"
+            className="gs-input w-full rounded-md pl-9"
+            placeholder="Pesquisar domínio ou path… (Ctrl+K)"
             value={query}
             onChange={(e) => onQueryChange(e.target.value)}
           />
         </div>
-        <div className="flex gap-1">
-          {CONFIDENCE_OPTIONS.map((opt) => (
-            <button
-              key={opt.value || "all"}
-              type="button"
-              onClick={() => onConfidenceChange(opt.value)}
-              className={`flex-1 border px-1 py-0.5 text-[11px] ${
-                confidence === opt.value
-                  ? "border-vscode-accent bg-vscode-selection text-vscode-fg"
-                  : "border-vscode-border bg-transparent text-vscode-muted hover:bg-vscode-hover"
-              }`}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-        <button
-          type="button"
-          onClick={() => onUnopenedOnlyChange(!unopenedOnly)}
-          className={`flex w-full items-center justify-center gap-1.5 border px-2 py-1 text-[11px] ${
-            unopenedOnly
-              ? "border-vscode-accent bg-vscode-selection text-vscode-fg"
-              : "border-vscode-border bg-transparent text-vscode-muted hover:bg-vscode-hover"
-          }`}
-          title="Mostrar apenas findings nunca abertos"
-        >
-          <Sparkles className="h-3 w-3" />
-          Novos
-          {unopenedCount > 0 && (
-            <span
-              className={`rounded px-1 text-[10px] ${
-                unopenedOnly ? "bg-vscode-accent text-white" : "bg-vscode-input text-vscode-fg"
-              }`}
-            >
-              {unopenedCount}
-            </span>
-          )}
-        </button>
-        <div className="max-h-[88px] overflow-y-auto overflow-x-hidden rounded border border-vscode-border/60 p-1">
-          <div className="flex flex-wrap gap-1">
-          {CHECKER_FILTER_OPTIONS.map((opt) => {
-            const active = checkerFilter === opt.value;
-            const count = countCheckerFilter(findingIdsForCounts, opt.value, checkerOverview);
-            return (
+
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <div className="inline-flex rounded-md border border-gs-border bg-gs-surface p-0.5">
+            {CONFIDENCE_OPTIONS.map((opt) => (
               <button
-                key={opt.value}
+                key={opt.value || "all"}
                 type="button"
-                title={opt.title}
-                onClick={() => onCheckerFilterChange(active ? "" : opt.value)}
-                className={`inline-flex shrink-0 items-center justify-center gap-1 border px-1.5 py-0.5 text-[10px] ${
-                  active
-                    ? "border-emerald-600/60 bg-emerald-950/40 text-emerald-300"
-                    : "border-vscode-border bg-transparent text-vscode-muted hover:bg-vscode-hover"
-                }`}
+                onClick={() => onConfidenceChange(opt.value)}
+                className={clsx(
+                  "rounded px-2.5 py-1 text-[11px] font-medium transition-colors",
+                  confidence === opt.value
+                    ? "bg-gs-accent text-white shadow-sm"
+                    : "text-gs-muted hover:text-gs-fg"
+                )}
               >
                 {opt.label}
-                {count > 0 && (
-                  <span
-                    className={`rounded px-1 text-[9px] ${
-                      active ? "bg-emerald-700/50 text-emerald-100" : "bg-vscode-input text-vscode-fg"
-                    }`}
-                  >
-                    {count}
-                  </span>
-                )}
               </button>
-            );
-          })}
+            ))}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => onUnopenedOnlyChange(!unopenedOnly)}
+            className={clsx(
+              "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors",
+              unopenedOnly
+                ? "border-sky-500/40 bg-sky-500/10 text-sky-300"
+                : "border-gs-border bg-gs-surface text-gs-muted hover:border-gs-border hover:bg-gs-hover hover:text-gs-fg"
+            )}
+            title="Mostrar apenas findings nunca abertos"
+          >
+            <Sparkles className="h-3 w-3" />
+            Novos
+            {unopenedCount > 0 && (
+              <span className="rounded-full bg-gs-surface-raised px-1.5 text-[10px] tabular-nums">{unopenedCount}</span>
+            )}
+          </button>
+        </div>
+
+        <div className="mt-2.5">
+          <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-gs-muted">
+            <Filter className="h-3 w-3" />
+            Checkers válidos
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {CHECKER_FILTER_OPTIONS.map((opt) => {
+              const active = checkerFilter === opt.value;
+              const count = countCheckerFilter(findingIdsForCounts, opt.value, checkerOverview);
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  title={opt.title}
+                  onClick={() => onCheckerFilterChange(active ? "" : opt.value)}
+                  className={clsx(
+                    "inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] transition-colors",
+                    active
+                      ? "border-gs-success/40 bg-gs-success/10 text-gs-success"
+                      : "border-gs-border/80 bg-gs-surface text-gs-muted hover:border-gs-border hover:bg-gs-hover hover:text-gs-fg"
+                  )}
+                >
+                  {opt.label}
+                  {count > 0 && (
+                    <span
+                      className={clsx(
+                        "min-w-[1.1rem] rounded-full px-1 text-center text-[9px] tabular-nums",
+                        active ? "bg-gs-success/20 text-gs-success" : "bg-gs-surface-raised text-gs-fg"
+                      )}
+                    >
+                      {count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto py-1">
-        {findings.length === 0 && (
-          <p className="px-3 py-4 text-vscode-muted">
-            {checkerFilter ? "Nenhum resultado válido" : "No results"}
-          </p>
-        )}
-        {findings.map((f) => {
-          const scripts = checkerOverview[f.id] ?? [];
-          const runId = runningScript?.findingId === f.id ? runningScript.scriptId : undefined;
-          return (
-            <button
-              key={f.id}
-              type="button"
-              onClick={() => onSelect(f.id)}
-              className={`flex w-full items-start gap-2 px-2 py-1 text-left hover:bg-vscode-hover ${
-                selectedId === f.id ? "bg-vscode-list-active" : ""
-              }`}
-            >
-              {f.hasCredentials ? (
-                <Key className="mt-0.5 h-3.5 w-3.5 shrink-0 text-vscode-warning" />
-              ) : f.isNew ? (
-                <span
-                  className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-sky-400"
-                  title="Nunca aberto"
-                />
-              ) : (
-                <span className="mt-0.5 inline-block h-3.5 w-3.5 shrink-0" />
-              )}
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-vscode-fg">{f.domain}</span>
-                <span className="block truncate text-[11px] text-vscode-muted">
-                  {f.path} · {f.confidence}
-                </span>
-                {f.hasCredentials && scripts.length > 0 && (
-                  <FindingCheckerStrip
-                    scripts={scripts}
-                    runningScriptId={runId}
-                    checkerFilter={checkerFilter}
-                  />
-                )}
-              </span>
-            </button>
-          );
-        })}
-      </div>
+
+      <FindingsTable
+        findings={findings}
+        selectedId={selectedId}
+        onSelect={onSelect}
+        onOpen={onOpen}
+        checkerOverview={checkerOverview}
+        runningScript={runningScript}
+        checkerFilter={checkerFilter}
+      />
     </div>
   );
 }

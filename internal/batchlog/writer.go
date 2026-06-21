@@ -17,11 +17,13 @@ import (
 var secretRe = regexp.MustCompile(`(?i)((?:password|passwd|secret|token|api[_-]?key|auth)\s*[=:]\s*)([^\s&"']+)`)
 
 type ManifestOpts struct {
-	Quick      bool `json:"quick"`
-	Limit      int  `json:"limit"`
-	ScriptID   string `json:"scriptId,omitempty"`
-	FindingID  int64  `json:"findingId,omitempty"`
-	UnopenedOnly bool `json:"unopenedOnly,omitempty"`
+	Quick        bool  `json:"quick"`
+	Limit        int   `json:"limit"`
+	ScriptID     string `json:"scriptId,omitempty"`
+	FindingID    int64  `json:"findingId,omitempty"`
+	UnopenedOnly bool  `json:"unopenedOnly,omitempty"`
+	UntestedOnly bool  `json:"untestedOnly,omitempty"`
+	ForceRecheck bool  `json:"forceRecheck,omitempty"`
 }
 
 type Manifest struct {

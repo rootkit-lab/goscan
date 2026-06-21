@@ -63,6 +63,10 @@ func (r *Runner) RunInteractive(ctx context.Context, scriptID, envPath string, e
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
 		res.Err = fmt.Errorf("pty: %w", err)
+		if emit != nil {
+			emit("terminal:data", fmt.Sprintf("Erro ao iniciar PTY: %v\r\n", err))
+			emit("terminal:exit", map[string]any{"scriptId": scriptID, "exitCode": 1})
+		}
 		cancel()
 		return res
 	}

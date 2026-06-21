@@ -1,27 +1,24 @@
 import type { ReactNode } from "react";
+import { ActivityBar } from "@/components/layout/ActivityBar";
+import type { WorkbenchView } from "@/lib/workbenchView";
 
 type Props = {
-  sidebar: ReactNode;
-  editor: ReactNode;
-  actions: ReactNode;
-  terminal: ReactNode;
+  view: WorkbenchView;
+  onViewChange: (view: WorkbenchView) => void;
+  batchActive?: boolean;
+  main: ReactNode;
+  terminal?: ReactNode | null;
   statusBar: ReactNode;
-  sidebarCollapsed?: boolean;
 };
 
-export function WorkbenchLayout({ sidebar, editor, actions, terminal, statusBar, sidebarCollapsed }: Props) {
+export function WorkbenchLayout({ view, onViewChange, batchActive, main, terminal, statusBar }: Props) {
   return (
-    <div className="flex h-screen flex-col bg-vscode-bg text-vscode-fg">
+    <div className="flex h-screen flex-col bg-gs-bg text-gs-fg">
       <div className="flex min-h-0 flex-1">
-        {!sidebarCollapsed && (
-          <aside className="flex w-[260px] shrink-0 flex-col border-r border-vscode-border bg-vscode-sidebar">{sidebar}</aside>
-        )}
-        <div className="flex min-w-0 flex-1 flex-col">
-          <div className="flex min-h-0 flex-1">
-            <main className="min-w-0 flex-1 bg-vscode-bg">{editor}</main>
-            <aside className="flex w-[280px] shrink-0 flex-col border-l border-vscode-border bg-vscode-sidebar">{actions}</aside>
-          </div>
-          {terminal}
+        <ActivityBar view={view} onViewChange={onViewChange} batchActive={batchActive} />
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col [&>*]:min-h-0 [&>*]:min-w-0 [&>*]:flex-1">{main}</div>
+          {terminal ?? null}
         </div>
       </div>
       {statusBar}

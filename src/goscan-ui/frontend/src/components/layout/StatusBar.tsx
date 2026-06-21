@@ -32,7 +32,7 @@ export function StatusBar({
       : "findings";
 
   return (
-    <footer className="flex h-[22px] shrink-0 items-center gap-3 border-t border-vscode-border bg-vscode-accent px-2 text-[12px] text-white">
+    <footer className="flex h-[22px] shrink-0 items-center gap-3 border-t border-gs-border bg-gs-statusbar px-2 text-[12px] text-gs-statusbar-fg">
       <span className="font-medium">goscan</span>
       <span className="opacity-90">
         {findingsCount} {countLabel}

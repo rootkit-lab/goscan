@@ -36,9 +36,9 @@ export function ResizablePanel({ title, defaultHeight = 180, minHeight = 80, max
   }, [onMouseMove, onMouseUp]);
 
   return (
-    <div className="flex shrink-0 flex-col border-t border-vscode-border bg-vscode-panel" style={{ height }}>
+    <div className="flex shrink-0 flex-col border-t border-gs-border bg-gs-surface" style={{ height }}>
       <div
-        className="flex h-[22px] shrink-0 cursor-row-resize items-center justify-between border-b border-vscode-border bg-vscode-sidebar px-2 text-[11px] uppercase tracking-wide text-vscode-muted"
+        className="flex h-[22px] shrink-0 cursor-row-resize items-center justify-between border-b border-gs-border bg-gs-surface px-2 text-[11px] uppercase tracking-wide text-gs-muted"
         onMouseDown={() => {
           dragging.current = true;
         }}
