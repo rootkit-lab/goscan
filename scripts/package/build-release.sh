@@ -2,7 +2,7 @@
 # Build prod (icon + binários). Venv Python só em Unix — Windows/deb postinst tratam checkers.
 set -eu
 
-ROOT="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
+ROOT="$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
 python3 scripts/icon-to-png.py
