@@ -24,6 +24,8 @@ import {
   alertEnvFound,
   alertPrefsFromSettings,
   alertScriptOk,
+  testEnvAlert,
+  unlockWebAudio,
   type AlertPrefs
 } from "@/lib/alerts";
 import { type CheckerResultFilter, findingMatchesCheckerFilter } from "@/lib/checkerFilters";
@@ -104,9 +106,12 @@ export function App() {
   const [draftPythonPath, setDraftPythonPath] = useState("");
   const [draftNotifyEnvFound, setDraftNotifyEnvFound] = useState(true);
   const [draftNotifyScriptOk, setDraftNotifyScriptOk] = useState(true);
-  const [draftSoundEnvFound, setDraftSoundEnvFound] = useState(false);
+  const [draftSoundEnvFound, setDraftSoundEnvFound] = useState(true);
   const [draftSoundScriptOk, setDraftSoundScriptOk] = useState(true);
   const [draftWorkers, setDraftWorkers] = useState<DraftWorker[]>([]);
+  const [notifyAvailable, setNotifyAvailable] = useState(true);
+  const [alertTestMsg, setAlertTestMsg] = useState("");
+  const [alertTesting, setAlertTesting] = useState(false);
   const [draftDeployRepoUrl, setDraftDeployRepoUrl] = useState("");
   const [draftDeployRepoRef, setDraftDeployRepoRef] = useState("");
   const [draftDeployRepoToken, setDraftDeployRepoToken] = useState("");
@@ -210,6 +215,46 @@ export function App() {
   useEffect(() => {
     void loadStats();
   }, [loadStats]);
+
+  useEffect(() => {
+    if (workbenchView !== "settings") return;
+    void api.notifyAvailable().then(setNotifyAvailable);
+  }, [workbenchView]);
+
+  useEffect(() => {
+    const unlock = () => unlockWebAudio();
+    window.addEventListener("pointerdown", unlock, { once: true });
+    window.addEventListener("keydown", unlock, { once: true });
+    return () => {
+      window.removeEventListener("pointerdown", unlock);
+      window.removeEventListener("keydown", unlock);
+    };
+  }, []);
+
+  const runTestEnvAlert = useCallback(async () => {
+    unlockWebAudio();
+    setAlertTesting(true);
+    setAlertTestMsg("");
+    const prefs = alertPrefsFromSettings({
+      notifyEnvFound: draftNotifyEnvFound,
+      notifyScriptOk: draftNotifyScriptOk,
+      soundEnvFound: draftSoundEnvFound,
+      soundScriptOk: draftSoundScriptOk
+    });
+    const r = await testEnvAlert(prefs);
+    setAlertTesting(false);
+    if (r.error) {
+      setAlertTestMsg(r.error);
+      return;
+    }
+    const parts: string[] = [];
+    if (draftSoundEnvFound) parts.push(r.soundOk ? "som OK" : "som falhou");
+    if (draftNotifyEnvFound) parts.push(r.notifyOk ? "notify OK" : "notify falhou");
+    if (!draftSoundEnvFound && !draftNotifyEnvFound) {
+      parts.push("activa notify ou som para testar");
+    }
+    setAlertTestMsg(parts.join(" · "));
+  }, [draftNotifyEnvFound, draftNotifyScriptOk, draftSoundEnvFound, draftSoundScriptOk]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -380,6 +425,7 @@ export function App() {
   }, [appendBatchLog, loadFindings, applyCheckerUpdate, refreshOverview, findings]);
 
   const startScan = async () => {
+    unlockWebAudio();
     try {
       setWorkerProgress([]);
       setScanLogLines([]);
@@ -635,6 +681,10 @@ export function App() {
             onSave={() => void saveSettings()}
             onOpenDataDir={() => void api.openDataDirectory()}
             onOpenScanDir={() => void api.openScanDirectory()}
+            notifyAvailable={notifyAvailable}
+            alertTestMsg={alertTestMsg}
+            alertTesting={alertTesting}
+            onTestEnvAlert={() => void runTestEnvAlert()}
             saving={settingsSaving}
           />
         </div>

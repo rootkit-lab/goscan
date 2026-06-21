@@ -197,6 +197,13 @@ export type RemoteWorkerTestResultDTO = {
   error?: string;
 };
 
+export type AlertTestResultDTO = {
+  soundOk: boolean;
+  notifyOk: boolean;
+  notifyAvailable: boolean;
+  error?: string;
+};
+
 export type SettingsSaveDTO = {
   dataDir: string;
   scanDir: string;
@@ -251,7 +258,13 @@ export const api = {
   openScanDirectory: () => Call.ByName(`${S}.OpenScanDirectory`) as Promise<void>,
   openEditorWindow: (findingId: number) =>
     Call.ByName(`${S}.OpenEditorWindow`, findingId) as Promise<void>,
-  focusMainWindow: () => Call.ByName(`${S}.FocusMainWindow`) as Promise<void>
+  focusMainWindow: () => Call.ByName(`${S}.FocusMainWindow`) as Promise<void>,
+  notifyAvailable: () => Call.ByName(`${S}.NotifyAvailable`) as Promise<boolean>,
+  desktopNotify: (title: string, body: string) =>
+    Call.ByName(`${S}.DesktopNotify`, title, body) as Promise<boolean>,
+  playAlertSound: (kind: string) => Call.ByName(`${S}.PlayAlertSound`, kind) as Promise<void>,
+  testEnvAlert: (notify: boolean, sound: boolean) =>
+    Call.ByName(`${S}.TestEnvAlert`, notify, sound) as Promise<AlertTestResultDTO>
 };
 
 export { Events };

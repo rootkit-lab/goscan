@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,6 +24,7 @@ type domainState struct {
 // DomainStore persiste domínios únicos em SQLite com cache em memória.
 type DomainStore struct {
 	db    *sql.DB
+	dbMu  sync.Mutex // serializa transacções (MaxOpenConns=1)
 	mu    sync.RWMutex
 	cache map[string]*domainState
 	count int64
@@ -33,7 +35,7 @@ func OpenDomainStore(path string) (*DomainStore, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite", path+"?_journal_mode=WAL&_busy_timeout=5000&_synchronous=NORMAL")
+	db, err := sql.Open("sqlite", path+"?_journal_mode=WAL&_busy_timeout=30000&_synchronous=NORMAL")
 	if err != nil {
 		return nil, err
 	}
@@ -154,6 +156,9 @@ func (s *DomainStore) Flush() error {
 	batch := s.batch
 	s.batch = nil
 	s.mu.Unlock()
+
+	s.dbMu.Lock()
+	defer s.dbMu.Unlock()
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -361,34 +366,71 @@ func (s *DomainStore) MarkScannedList(domains []string) error {
 			end = len(domains)
 		}
 		batch := domains[i:end]
-		tx, err := s.db.Begin()
-		if err != nil {
+		if err := s.markScannedBatch(batch); err != nil {
 			return err
 		}
-		stmt, err := tx.Prepare(`UPDATE domains SET scanned_at = datetime('now') WHERE domain = ? AND scanned_at IS NULL`)
-		if err != nil {
+	}
+	return nil
+}
+
+func (s *DomainStore) markScannedBatch(batch []string) error {
+	var lastErr error
+	for attempt := 0; attempt < 8; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt*attempt) * 40 * time.Millisecond)
+		}
+		lastErr = s.markScannedBatchOnce(batch)
+		if lastErr == nil {
+			return nil
+		}
+		if !sqliteBusy(lastErr) {
+			return lastErr
+		}
+	}
+	return lastErr
+}
+
+func sqliteBusy(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "database is locked") ||
+		strings.Contains(msg, "sqlite_busy") ||
+		strings.Contains(msg, "sqlite_busy_snapshot")
+}
+
+func (s *DomainStore) markScannedBatchOnce(batch []string) error {
+	s.dbMu.Lock()
+	defer s.dbMu.Unlock()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	stmt, err := tx.Prepare(`UPDATE domains SET scanned_at = datetime('now') WHERE domain = ? AND scanned_at IS NULL`)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+	for _, d := range batch {
+		if _, err := stmt.Exec(d); err != nil {
+			stmt.Close()
 			tx.Rollback()
 			return err
 		}
-		for _, d := range batch {
-			if _, err := stmt.Exec(d); err != nil {
-				stmt.Close()
-				tx.Rollback()
-				return err
-			}
-		}
-		stmt.Close()
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-		s.mu.Lock()
-		for _, d := range batch {
-			if st, ok := s.cache[d]; ok {
-				st.scanned = true
-			}
-		}
-		s.mu.Unlock()
 	}
+	stmt.Close()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	for _, d := range batch {
+		if st, ok := s.cache[d]; ok {
+			st.scanned = true
+		}
+	}
+	s.mu.Unlock()
 	return nil
 }
 

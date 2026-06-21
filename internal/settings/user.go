@@ -170,7 +170,7 @@ func (u User) SoundEnvFoundOrDefault() bool {
 	if u.SoundEnvFound != nil {
 		return *u.SoundEnvFound
 	}
-	return false
+	return true
 }
 
 // SoundScriptOkOrDefault returns whether to play a sound when a checker succeeds.

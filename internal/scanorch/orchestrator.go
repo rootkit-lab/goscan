@@ -203,6 +203,7 @@ func Run(opts Options) error {
 	}
 
 	var wg sync.WaitGroup
+	var markMu sync.Mutex
 	errCh := make(chan error, len(jobs))
 	for _, j := range jobs {
 		j := j
@@ -212,7 +213,7 @@ func Run(opts Options) error {
 			updateProgress(WorkerProgress{
 				WorkerID: j.id, WorkerName: j.name, Status: "preparing", Running: true,
 			})
-			errCh <- runWorkerLoop(opts, j, hubRegistry, workerCount, chunkSize, updateProgress)
+			errCh <- runWorkerLoop(opts, &markMu, j, hubRegistry, workerCount, chunkSize, updateProgress)
 		}()
 	}
 	wg.Wait()
@@ -274,7 +275,7 @@ func syncDomainsFromFiles(opts Options, verbose bool) (int64, error) {
 	return added, nil
 }
 
-func runWorkerLoop(opts Options, j struct {
+func runWorkerLoop(opts Options, markMu *sync.Mutex, j struct {
 	id, name     string
 	worker       settings.RemoteWorker
 	local        bool
@@ -366,7 +367,9 @@ func runWorkerLoop(opts Options, j struct {
 		}
 
 		emitOut(opts, fmt.Sprintf("[%s] a marcar %d dom na base central…", name, len(batch)))
+		markMu.Lock()
 		markErr := opts.Domains.MarkScannedList(batch)
+		markMu.Unlock()
 		if markErr != nil {
 			return markErr
 		}

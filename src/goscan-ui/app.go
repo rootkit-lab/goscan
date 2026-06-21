@@ -15,6 +15,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 
 	"goscan/internal/batchlog"
+	"goscan/internal/desktop"
 	"goscan/internal/paths"
 	"goscan/internal/remoteworker"
 	"goscan/internal/scanorch"
@@ -588,6 +589,59 @@ func (a *App) OpenDataDirectory() error {
 
 func (a *App) OpenScanDirectory() error {
 	return openPathInFileManager(a.scanDir)
+}
+
+type AlertTestResultDTO struct {
+	SoundOK         bool   `json:"soundOk"`
+	NotifyOK        bool   `json:"notifyOk"`
+	NotifyAvailable bool   `json:"notifyAvailable"`
+	Error           string `json:"error,omitempty"`
+}
+
+func (a *App) notificationIcon() string {
+	return desktop.ResolveIcon(desktop.DefaultIconCandidates(a.repoRoot)...)
+}
+
+// DesktopNotify shows a native OS notification (notify-send on Linux).
+func (a *App) DesktopNotify(title, body string) (bool, error) {
+	if err := desktop.Notify(title, body, a.notificationIcon()); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// PlayAlertSound plays a short system alert (kind: env | script_ok).
+func (a *App) PlayAlertSound(kind string) error {
+	return desktop.PlaySound(kind)
+}
+
+// NotifyAvailable reports whether native notifications are supported.
+func (a *App) NotifyAvailable() bool {
+	return desktop.NotifyAvailable()
+}
+
+// TestEnvAlert triggers env-found sound/notify for settings validation.
+func (a *App) TestEnvAlert(notify, sound bool) AlertTestResultDTO {
+	res := AlertTestResultDTO{NotifyAvailable: desktop.NotifyAvailable()}
+	var errs []string
+	if sound {
+		if err := desktop.PlaySound("env"); err != nil {
+			errs = append(errs, "som: "+err.Error())
+		} else {
+			res.SoundOK = true
+		}
+	}
+	if notify {
+		if err := desktop.Notify("Novo .env (teste)", "example.com/.env", a.notificationIcon()); err != nil {
+			errs = append(errs, "notify: "+err.Error())
+		} else {
+			res.NotifyOK = true
+		}
+	}
+	if len(errs) > 0 {
+		res.Error = strings.Join(errs, "; ")
+	}
+	return res
 }
 
 func (a *App) emit(event string, data any) {

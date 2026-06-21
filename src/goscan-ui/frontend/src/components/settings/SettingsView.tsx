@@ -38,6 +38,10 @@ type Props = {
   onSave: () => void;
   onOpenDataDir: () => void;
   onOpenScanDir: () => void;
+  notifyAvailable: boolean;
+  alertTestMsg?: string;
+  alertTesting?: boolean;
+  onTestEnvAlert: () => void;
   saving?: boolean;
 };
 
@@ -120,6 +124,10 @@ export function SettingsView({
   onSave,
   onOpenDataDir,
   onOpenScanDir,
+  notifyAvailable,
+  alertTestMsg,
+  alertTesting,
+  onTestEnvAlert,
   saving
 }: Props) {
   return (
@@ -227,6 +235,26 @@ export function SettingsView({
               onChange={onDraftSoundScriptOkChange}
             />
           </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className="rounded border border-gs-accent/50 bg-gs-accent/10 px-2.5 py-1 text-[11px] text-gs-accent hover:bg-gs-accent/20 disabled:opacity-50"
+              disabled={alertTesting}
+              onClick={onTestEnvAlert}
+            >
+              {alertTesting ? "A testar…" : "Testar alerta .env"}
+            </button>
+            {notifyAvailable ? (
+              <span className="text-[11px] text-gs-success">● notify-send disponível</span>
+            ) : (
+              <span className="text-[11px] text-gs-warning">
+                ⚠ notify-send em falta — instala libnotify-bin
+              </span>
+            )}
+          </div>
+          {alertTestMsg ? (
+            <p className="mt-1 text-[11px] text-gs-muted">{alertTestMsg}</p>
+          ) : null}
         </Section>
 
         <DeployRepoSection
