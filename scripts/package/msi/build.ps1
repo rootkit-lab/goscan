@@ -50,11 +50,12 @@ $ProductVersion = ($parts[0..3] -join ".")
   -cg AppFiles `
   -dr APPDIR `
   -srd -sfrag -gg `
+  -platform x64 `
   -var var.StageDir `
   -out $HeatOut
 if ($LASTEXITCODE -ne 0) { throw "heat falhou" }
 
-& candle.exe -nologo `
+& candle.exe -nologo -arch x64 `
   "-dProductVersion=$ProductVersion" `
   "-dStageDir=$StageApp" `
   -out "$WixObj\" `
