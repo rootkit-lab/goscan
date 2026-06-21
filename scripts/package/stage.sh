@@ -13,11 +13,23 @@ fi
 
 mkdir -p "$DEST/bin" "$DEST/scripts"
 
-[ -x "$ROOT/bin/goscan" ] || { echo "stage: bin/goscan em falta — make release" >&2; exit 1; }
-[ -x "$ROOT/bin/goscan-ui" ] || { echo "stage: bin/goscan-ui em falta" >&2; exit 1; }
-[ -x "$ROOT/bin/goscan-remote" ] || { echo "stage: bin/goscan-remote em falta" >&2; exit 1; }
+install_bin() {
+  name="$1"
+  src="$ROOT/bin/$name"
+  if [ ! -x "$src" ]; then
+    src="$ROOT/bin/${name}.exe"
+  fi
+  [ -x "$src" ] || { echo "stage: bin/$name em falta — make release" >&2; exit 1; }
+  dest="$DEST/bin/$name"
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) dest="$DEST/bin/${name}.exe" ;;
+  esac
+  install -m 755 "$src" "$dest"
+}
 
-install -m 755 "$ROOT/bin/goscan" "$ROOT/bin/goscan-ui" "$ROOT/bin/goscan-remote" "$DEST/bin/"
+install_bin goscan
+install_bin goscan-ui
+install_bin goscan-remote
 
 if command -v rsync >/dev/null 2>&1; then
   rsync -a --delete \
