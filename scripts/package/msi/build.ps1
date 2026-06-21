@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 $ErrorActionPreference = "Stop"
 
-$Root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$Root = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..")).Path
 $Version = (Get-Content (Join-Path $Root "assets\VERSION") -Raw).Trim()
 $StageApp = Join-Path $Root "dist\package\msi\stage\app"
 $OutDir = Join-Path $Root "dist"

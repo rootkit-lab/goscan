@@ -50,6 +50,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y python3 python3-venv python3-pip rsync
 
+      - name: Frontend deps
+        run: cd src/goscan-ui/frontend && npm ci
+
       - name: Build release
         run: make release
 
@@ -89,6 +92,13 @@ jobs:
           node-version: "20"
           cache: npm
           cache-dependency-path: src/goscan-ui/frontend/package-lock.json
+
+      - name: Dependências build
+        run: choco install make -y
+
+      - name: Frontend deps
+        shell: bash
+        run: cd src/goscan-ui/frontend && npm ci
 
       - name: WiX Toolset
         run: dotnet tool install --global wix --version 5.0.2
