@@ -46,7 +46,7 @@ $parts = $Version.Split(".")
 while ($parts.Count -lt 4) { $parts += "0" }
 $ProductVersion = ($parts[0..3] -join ".")
 
-& heat.exe dir $StageApp `
+& heat.exe dir "$StageApp" `
   -cg AppFiles `
   -dr APPDIR `
   -srd -sfrag -gg `
@@ -55,9 +55,9 @@ $ProductVersion = ($parts[0..3] -join ".")
 if ($LASTEXITCODE -ne 0) { throw "heat falhou" }
 
 & candle.exe -nologo `
-  -dProductVersion=$ProductVersion `
-  -dStageDir=$StageApp `
-  -out $WixObj\ `
+  "-dProductVersion=$ProductVersion" `
+  "-dStageDir=$StageApp" `
+  -out "$WixObj\" `
   $ProductWxs $HeatOut
 if ($LASTEXITCODE -ne 0) { throw "candle falhou" }
 

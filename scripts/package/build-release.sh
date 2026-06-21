@@ -9,6 +9,7 @@ python3 scripts/icon-to-png.py
 
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
+    export GOOS=windows GOARCH=amd64
     ;;
   *)
     make scripts-venv
