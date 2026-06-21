@@ -1,0 +1,146 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Versão (ex.: 1.0.1) — sobrescreve assets/VERSION no job"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  GO_VERSION: "1.25.x"
+
+jobs:
+  build-deb:
+    name: Linux .deb
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Versão
+        id: ver
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "${{ inputs.version }}" > assets/VERSION
+          fi
+          v=$(tr -d '\n\r' < assets/VERSION)
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "tag=v${v}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: src/goscan-ui/frontend/package-lock.json
+
+      - name: Dependências sistema
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3 python3-venv python3-pip rsync
+
+      - name: Build release
+        run: make release
+
+      - name: Empacotar .deb
+        run: |
+          chmod +x scripts/package/stage.sh scripts/package/deb/build.sh
+          SKIP_RELEASE=1 ./scripts/package/deb/build.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: goscan-deb
+          path: dist/goscan_${{ steps.ver.outputs.version }}_amd64.deb
+
+  build-msi:
+    name: Windows .msi
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Versão
+        id: ver
+        shell: bash
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "${{ inputs.version }}" > assets/VERSION
+          fi
+          v=$(tr -d '\n\r' < assets/VERSION)
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: src/goscan-ui/frontend/package-lock.json
+
+      - name: WiX Toolset
+        run: dotnet tool install --global wix --version 5.0.2
+
+      - name: Empacotar .msi
+        shell: pwsh
+        run: |
+          $env:Path = "$env:USERPROFILE\.dotnet\tools;$env:Path"
+          pwsh -File scripts/package/msi/build.ps1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: goscan-msi
+          path: dist/goscan_${{ steps.ver.outputs.version }}_amd64.msi
+
+  github-release:
+    name: GitHub Release
+    needs: [build-deb, build-msi]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Versão e tag
+        id: ver
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "${{ inputs.version }}" > assets/VERSION
+          fi
+          v=$(tr -d '\n\r' < assets/VERSION)
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=v${v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: goscan-*
+          path: dist
+          merge-multiple: true
+
+      - name: Listar artefactos
+        run: find dist -type f -ls
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: GoScan ${{ steps.ver.outputs.version }}
+          generate_release_notes: true
+          files: |
+            dist/goscan_${{ steps.ver.outputs.version }}_amd64.deb
+            dist/goscan_${{ steps.ver.outputs.version }}_amd64.msi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -8,7 +8,7 @@ GOSCAN_UI_PORT ?= 9280
 VERSION ?= $(shell tr -d '\n' < assets/VERSION 2>/dev/null || echo 0.0.0-dev)
 LDFLAGS := -s -w
 
-.PHONY: help build build-remote scan findings-list migrate-findings dev-ui setup-hooks test scripts-venv test-all-envs test-checkers-smoke batch-analyze release install uninstall install-doctor migrate-prod-data icon init-worker-release-repo publish-worker
+.PHONY: help build build-remote scan findings-list migrate-findings dev-ui setup-hooks test scripts-venv test-all-envs test-checkers-smoke batch-analyze release install uninstall install-doctor migrate-prod-data icon init-worker-release-repo publish-worker package-deb package-msi release-publish
 
 help:
 	@echo "goscan — targets:"
@@ -23,6 +23,9 @@ help:
 	@echo "  make install            # instala em ~/.local (prod)"
 	@echo "  make migrate-prod-data  # copia repo → prod XDG"
 	@echo "  make install-doctor     # verifica dev vs prod"
+	@echo "  make package-deb        # gera dist/goscan_VERSION_amd64.deb"
+	@echo "  make package-msi        # gera dist/goscan_VERSION_amd64.msi (Windows/WiX)"
+	@echo "  make release-publish    # tag vX.Y.Z + push → GitHub Actions (.deb + .msi)"
 	@echo "  make test-all-envs      # testa checkers em batch (CLI; ARGS=--filter mysql)"
 	@echo "  make batch-analyze      # analisa falhas do último batch"
 	@echo "  make test-checkers-smoke # smoke: 1 execução por checker"
@@ -95,7 +98,18 @@ icon:
 
 release: icon scripts-venv build-ui build
 	@test -x bin/goscan-ui || (echo "❌ bin/goscan-ui em falta" && exit 1)
-	@echo "Release $(VERSION) → bin/goscan bin/goscan-ui"
+	@echo "Release $(VERSION) → bin/goscan bin/goscan-ui bin/goscan-remote"
+
+package-deb: release
+	chmod +x scripts/package/stage.sh scripts/package/deb/build.sh
+	./scripts/package/deb/build.sh
+
+package-msi: release
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package/msi/build.ps1
+
+release-publish:
+	chmod +x scripts/release-publish.sh
+	./scripts/release-publish.sh $(VERSION)
 
 install: release
 	chmod +x scripts/install.sh scripts/uninstall.sh scripts/install-doctor.sh

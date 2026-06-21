@@ -48,6 +48,7 @@ files/
 /goscan-ui
 /dist/
 /dist/worker-release/
+scripts/package/msi/Files.wxs
 
 # Node / frontend
 node_modules/

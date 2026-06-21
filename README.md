@@ -93,6 +93,17 @@ scripts/             Checkers Python + registry.yaml
 
 Ver [`docs/remote-scan.md`](docs/remote-scan.md) e [`docs/worker-release-repo.md`](docs/worker-release-repo.md).
 
+## Releases (.deb / .msi)
+
+Instaladores gerados pelo GitHub Actions em cada tag `v*`:
+
+```bash
+make release-publish VERSION=1.0.1   # tag + push → CI
+# ou: Actions → Release → Run workflow
+```
+
+Ver [`docs/release.md`](docs/release.md).
+
 ## Licença
 
 MIT — ver [LICENSE](LICENSE).
