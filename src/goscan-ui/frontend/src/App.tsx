@@ -6,8 +6,9 @@ import { CommandPalette } from "@/components/command/CommandPalette";
 import { StatusBar } from "@/components/layout/StatusBar";
 import { WorkbenchLayout } from "@/components/layout/WorkbenchLayout";
 import { SettingsView } from "@/components/settings/SettingsView";
+import type { DraftWorker } from "@/components/settings/RemoteWorkersSection";
 import { FindingsSidebar } from "@/components/sidebar/FindingsSidebar";
-import { BottomPanel, BATCH_BOTTOM_TABS, type BottomTab } from "@/components/terminal/BottomPanel";
+import { BottomPanel, FINDINGS_BOTTOM_TABS, type BottomTab } from "@/components/terminal/BottomPanel";
 import {
   api,
   Events,
@@ -15,6 +16,7 @@ import {
   type CheckerResultDTO,
   type FindingsStatsDTO,
   type ScanProgressDTO,
+  type ScanWorkerProgressDTO,
   type ScriptCheckerStatusDTO,
   type SettingsDTO
 } from "@/lib/api";
@@ -74,10 +76,20 @@ export function App() {
   const [checkerOverview, setCheckerOverview] = useState<Record<number, ScriptCheckerStatusDTO[]>>({});
   const [runningScript, setRunningScript] = useState<{ findingId: number; scriptId: string } | undefined>();
   const [scanProgress, setScanProgress] = useState<ScanProgressDTO | null>(null);
-  const [scanOpts, setScanOpts] = useState({ threads: 50, fast: false, rescan: false, timeoutSec: 8 });
+  const [workerProgress, setWorkerProgress] = useState<ScanWorkerProgressDTO[]>([]);
+  const [scanLogLines, setScanLogLines] = useState<string[]>([]);
+  const [scanLogFilter, setScanLogFilter] = useState("all");
+  const [scanOpts, setScanOpts] = useState({
+    threads: 50,
+    fast: false,
+    rescan: false,
+    timeoutSec: 8,
+    targets: [] as string[],
+    deployRemote: false
+  });
   const [error, setError] = useState("");
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [bottomTab, setBottomTab] = useState<BottomTab>("batch-log");
+  const [bottomTab, setBottomTab] = useState<BottomTab>("scan-log");
   const [batchLogLines, setBatchLogLines] = useState<string[]>([]);
   const [batchRunning, setBatchRunning] = useState(false);
   const [batchProgress, setBatchProgress] = useState<BatchProgressDTO | null>(null);
@@ -94,6 +106,12 @@ export function App() {
   const [draftNotifyScriptOk, setDraftNotifyScriptOk] = useState(true);
   const [draftSoundEnvFound, setDraftSoundEnvFound] = useState(false);
   const [draftSoundScriptOk, setDraftSoundScriptOk] = useState(true);
+  const [draftWorkers, setDraftWorkers] = useState<DraftWorker[]>([]);
+  const [draftDeployRepoUrl, setDraftDeployRepoUrl] = useState("");
+  const [draftDeployRepoRef, setDraftDeployRepoRef] = useState("");
+  const [draftDeployRepoToken, setDraftDeployRepoToken] = useState("");
+  const [draftDeployRepoMethod, setDraftDeployRepoMethod] = useState("git");
+  const [draftHubEnabled, setDraftHubEnabled] = useState(true);
   const [settingsSaving, setSettingsSaving] = useState(false);
 
   const selectedIdRef = useRef(selectedId);
@@ -125,6 +143,28 @@ export function App() {
       setDraftNotifyScriptOk(s.notifyScriptOk);
       setDraftSoundEnvFound(s.soundEnvFound);
       setDraftSoundScriptOk(s.soundScriptOk);
+      setDraftDeployRepoUrl(s.deployRepoUrl ?? "");
+      setDraftDeployRepoRef(s.deployRepoRef ?? "");
+      setDraftDeployRepoMethod(s.deployRepoMethod || "git");
+      setDraftDeployRepoToken("");
+      setDraftHubEnabled(s.hubEnabled ?? true);
+      setDraftWorkers(
+        (s.workers ?? []).map((w) => ({
+          id: w.id,
+          name: w.name,
+          host: w.host,
+          port: w.port || 22,
+          user: w.user,
+          authType: w.authType || "password",
+          password: "",
+          keyPath: w.keyPath,
+          keyPassphrase: "",
+          execMode: w.execMode || "ssh",
+          apiPort: w.apiPort || 9090,
+          apiToken: "",
+          enabled: w.enabled
+        }))
+      );
       alertPrefsRef.current = alertPrefsFromSettings(s);
     } catch (e) {
       setError(String(e));
@@ -225,10 +265,33 @@ export function App() {
     const offProgress = Events.On("scan:progress", (ev) => {
       const p = data(ev) as ScanProgressDTO;
       setScanProgress(p);
+      if (!p.running) {
+        setWorkerProgress((prev) => prev.map((w) => ({ ...w, running: false, status: w.running ? "cancelled" : w.status })));
+        void loadFindings();
+      }
+    });
+    const offWorkerProgress = Events.On("scan:worker-progress", (ev) => {
+      const wp = data(ev) as ScanWorkerProgressDTO;
+      setWorkerProgress((prev) => {
+        const idx = prev.findIndex((x) => x.workerId === wp.workerId);
+        if (idx < 0) return [...prev, wp];
+        const next = [...prev];
+        next[idx] = wp;
+        return next;
+      });
+    });
+    const offScanOutput = Events.On("scan:output", (ev) => {
+      const line = String(data(ev));
+      setScanLogLines((prev) => [...prev.slice(-2000), line]);
     });
     const offFound = Events.On("scan:found", (ev) => {
-      const found = data(ev) as { domain?: string; path?: string };
-      alertEnvFound(alertPrefsRef.current, found.domain ?? "", found.path ?? "");
+      const found = data(ev) as { domain?: string; path?: string; isNew?: boolean };
+      if (found.isNew !== false) {
+        alertEnvFound(alertPrefsRef.current, found.domain ?? "", found.path ?? "");
+      }
+      void loadFindings();
+    });
+    const offFindingsRefresh = Events.On("scan:findings-refresh", () => {
       void loadFindings();
     });
 
@@ -304,7 +367,10 @@ export function App() {
 
     return () => {
       offProgress();
+      offWorkerProgress();
+      offScanOutput();
       offFound();
+      offFindingsRefresh();
       offCheckerRunning();
       offCheckerUpdated();
       offBatchOutput();
@@ -315,7 +381,19 @@ export function App() {
 
   const startScan = async () => {
     try {
-      await api.startScan({ ...scanOpts, dir: draftScanDir || settings?.scanDir || undefined });
+      setWorkerProgress([]);
+      setScanLogLines([]);
+      setScanProgress({ domainsScanned: 0, vulnsFound: 0, domainsNew: 0, domainsPending: 0, running: true });
+      setBottomTab("scan-log");
+      let targets = scanOpts.targets;
+      if (targets.length === 0) {
+        targets = ["local", ...(settings?.workers ?? []).filter((w) => w.enabled).map((w) => w.id)];
+      }
+      await api.startScan({
+        ...scanOpts,
+        targets,
+        dir: draftScanDir || settings?.scanDir || undefined
+      });
     } catch (e) {
       setError(String(e));
     }
@@ -362,7 +440,13 @@ export function App() {
         notifyEnvFound: draftNotifyEnvFound,
         notifyScriptOk: draftNotifyScriptOk,
         soundEnvFound: draftSoundEnvFound,
-        soundScriptOk: draftSoundScriptOk
+        soundScriptOk: draftSoundScriptOk,
+        deployRepoUrl: draftDeployRepoUrl,
+        deployRepoRef: draftDeployRepoRef,
+        deployRepoToken: draftDeployRepoToken,
+        deployRepoMethod: draftDeployRepoMethod,
+        hubEnabled: draftHubEnabled,
+        workers: draftWorkers.map(({ testResult: _t, testing: _x, ...w }) => w)
       });
       await loadSettings();
       await loadFindings();
@@ -371,6 +455,35 @@ export function App() {
       setError(String(e));
     } finally {
       setSettingsSaving(false);
+    }
+  };
+
+  const pickKeyForWorker = async (index: number) => {
+    try {
+      const current = draftWorkers[index]?.keyPath ?? "";
+      const picked = await api.pickKeyFile("Chave SSH (PEM ou PPK)", current);
+      setDraftWorkers((prev) => prev.map((w, i) => (i === index ? { ...w, keyPath: picked } : w)));
+    } catch (e) {
+      const msg = String(e);
+      if (!msg.includes("cancel") && !msg.includes("nenhum")) setError(msg);
+    }
+  };
+
+  const testWorker = async (index: number) => {
+    const worker = draftWorkers[index];
+    if (!worker) return;
+    setDraftWorkers((prev) => prev.map((w, i) => (i === index ? { ...w, testing: true, testResult: undefined } : w)));
+    try {
+      const result = await api.testRemoteWorker(worker);
+      setDraftWorkers((prev) =>
+        prev.map((w, i) => (i === index ? { ...w, testing: false, testResult: result } : w))
+      );
+    } catch (e) {
+      setDraftWorkers((prev) =>
+        prev.map((w, i) =>
+          i === index ? { ...w, testing: false, testResult: { ok: false, remoteVersion: "", error: String(e) } } : w
+        )
+      );
     }
   };
 
@@ -399,12 +512,18 @@ export function App() {
     }
   };
 
+  // Progresso agregado vem do backend (fila central SQLite); workers só mostram slice da onda.
+
   const batchLabel = batchProgress
     ? `${batchProgress.domain} · ${batchProgress.scriptLabel} (${batchProgress.scriptIndex}/${batchProgress.scriptTotal})`
     : undefined;
 
   const scanStats = scanProgress
-    ? `${scanProgress.domainsScanned} dom · ${scanProgress.vulnsFound} vulns`
+    ? scanProgress.running
+      ? `${scanProgress.domainsScanned.toLocaleString()} sessão · ${scanProgress.domainsPending.toLocaleString()} fila · ${scanProgress.vulnsFound} vulns`
+      : workerProgress.length > 1
+        ? `${scanProgress.domainsScanned} dom · ${scanProgress.vulnsFound} vulns · ${workerProgress.filter((w) => w.running).length} workers`
+        : `${scanProgress.domainsScanned} dom · ${scanProgress.vulnsFound} vulns`
     : undefined;
 
   const panelRunningId = runningScript?.scriptId;
@@ -486,6 +605,23 @@ export function App() {
             draftNotifyScriptOk={draftNotifyScriptOk}
             draftSoundEnvFound={draftSoundEnvFound}
             draftSoundScriptOk={draftSoundScriptOk}
+            draftHubEnabled={draftHubEnabled}
+            draftWorkers={draftWorkers}
+            draftDeployRepoUrl={draftDeployRepoUrl}
+            draftDeployRepoRef={draftDeployRepoRef}
+            draftDeployRepoToken={draftDeployRepoToken}
+            draftDeployRepoMethod={draftDeployRepoMethod}
+            deployRepoHasToken={settings?.deployRepoHasToken ?? false}
+            onDraftWorkersChange={setDraftWorkers}
+            onDeployRepoChange={(patch) => {
+              if (patch.url !== undefined) setDraftDeployRepoUrl(patch.url);
+              if (patch.ref !== undefined) setDraftDeployRepoRef(patch.ref);
+              if (patch.method !== undefined) setDraftDeployRepoMethod(patch.method);
+              if (patch.token !== undefined) setDraftDeployRepoToken(patch.token);
+            }}
+            onDraftHubEnabledChange={setDraftHubEnabled}
+            onPickKey={(i) => void pickKeyForWorker(i)}
+            onTestWorker={(i) => void testWorker(i)}
             onDraftDataDirChange={setDraftDataDir}
             onDraftScanDirChange={setDraftScanDir}
             onDraftPythonPathChange={setDraftPythonPath}
@@ -519,6 +655,8 @@ export function App() {
               onCancelScan={() => void api.cancelScan()}
               scanRunning={scanRunning}
               scanProgress={scanProgress}
+              workerProgress={workerProgress}
+              workers={settings?.workers ?? []}
               scanDir={draftScanDir || settings?.scanDir}
             />
           </aside>
@@ -529,7 +667,9 @@ export function App() {
     return null;
   })();
 
-  const showBatchLog = batchRunning && workbenchView === "findings";
+  const showBottomPanel =
+    workbenchView === "findings" && (scanRunning || scanLogLines.length > 0 || batchRunning);
+  const bottomTabs: BottomTab[] = batchRunning ? FINDINGS_BOTTOM_TABS : ["scan-log"];
 
   return (
     <>
@@ -539,18 +679,26 @@ export function App() {
         batchActive={batchRunning}
         main={mainContent}
         terminal={
-          showBatchLog ? (
+          showBottomPanel ? (
             <BottomPanel
-              tabs={BATCH_BOTTOM_TABS}
+              tabs={bottomTabs}
               tab={bottomTab}
               onTabChange={setBottomTab}
               outputLines={[]}
               batchLogLines={batchLogLines}
+              scanLogLines={scanLogLines}
+              scanLogFilter={scanLogFilter}
+              onScanLogFilterChange={setScanLogFilter}
+              scanWorkers={workerProgress}
+              scanRunning={scanRunning}
+              onCancelScan={() => void api.cancelScan()}
+              onRestartScan={() => void startScan()}
               onClearOutput={() => {}}
               onClearBatchLog={() => setBatchLogLines([])}
+              onClearScanLog={() => setScanLogLines([])}
               batchLogDir={batchLogDir}
               onOpenBatchLogs={() => void api.openBatchLogDir(batchLogDir)}
-              defaultHeight={200}
+              defaultHeight={280}
             />
           ) : null
         }

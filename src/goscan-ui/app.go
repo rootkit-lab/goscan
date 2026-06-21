@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,6 +16,8 @@ import (
 
 	"goscan/internal/batchlog"
 	"goscan/internal/paths"
+	"goscan/internal/remoteworker"
+	"goscan/internal/scanorch"
 	"goscan/internal/scanner"
 	"goscan/internal/scripts"
 	"goscan/internal/settings"
@@ -77,19 +80,38 @@ type ScriptDTO struct {
 }
 
 type ScanOptsDTO struct {
-	Dir         string `json:"dir"`
-	Threads     int    `json:"threads"`
-	PathWorkers int    `json:"pathWorkers"`
-	Fast        bool   `json:"fast"`
-	Rescan      bool   `json:"rescan"`
-	TimeoutSec  int    `json:"timeoutSec"`
+	Dir          string   `json:"dir"`
+	Threads      int      `json:"threads"`
+	PathWorkers  int      `json:"pathWorkers"`
+	Fast         bool     `json:"fast"`
+	Rescan       bool     `json:"rescan"`
+	TimeoutSec   int      `json:"timeoutSec"`
+	Targets      []string `json:"targets"`
+	DeployRemote bool     `json:"deployRemote"`
+}
+
+type ScanWorkerProgressDTO struct {
+	WorkerID       string `json:"workerId"`
+	WorkerName     string `json:"workerName"`
+	DomainsScanned int64  `json:"domainsScanned"`
+	VulnsFound     int64  `json:"vulnsFound"`
+	DomainsTotal   int64  `json:"domainsTotal"`
+	Status         string `json:"status"`
+	Error          string `json:"error,omitempty"`
+	Running        bool   `json:"running"`
+	PhasePercent   int    `json:"phasePercent,omitempty"`
+	PhaseLabel     string `json:"phaseLabel,omitempty"`
 }
 
 type ScanProgressDTO struct {
-	DomainsScanned int64 `json:"domainsScanned"`
+	DomainsScanned int64 `json:"domainsScanned"` // sessão actual (ondas concluídas + onda em curso)
 	VulnsFound     int64 `json:"vulnsFound"`
 	DomainsNew     int64 `json:"domainsNew"`
-	DomainsPending int64 `json:"domainsPending"`
+	DomainsPending int64 `json:"domainsPending"` // fila central
+	Wave           int   `json:"wave,omitempty"`
+	WaveBatchSize  int   `json:"waveBatchSize,omitempty"`
+	WaveScanned    int64 `json:"waveScanned,omitempty"`
+	SessionScanned int64 `json:"sessionScanned,omitempty"`
 	Running        bool  `json:"running"`
 }
 
@@ -164,30 +186,79 @@ type BatchDoneDTO struct {
 }
 
 type SettingsDTO struct {
-	Mode                string `json:"mode"`
-	DataDir             string `json:"dataDir"`
-	ScanDir             string `json:"scanDir"`
-	AppRoot             string `json:"appRoot"`
-	DefaultProdDataDir  string `json:"defaultProdDataDir"`
-	PointsToDevRepo      bool   `json:"pointsToDevRepo"`
-	NeedsSetup          bool   `json:"needsSetup"`
-	Version             string `json:"version"`
-	PythonPath          string `json:"pythonPath"`
-	PythonPathEffective string `json:"pythonPathEffective"`
-	NotifyEnvFound      bool   `json:"notifyEnvFound"`
-	NotifyScriptOk      bool   `json:"notifyScriptOk"`
-	SoundEnvFound       bool   `json:"soundEnvFound"`
-	SoundScriptOk       bool   `json:"soundScriptOk"`
+	Mode                string            `json:"mode"`
+	DataDir             string            `json:"dataDir"`
+	ScanDir             string            `json:"scanDir"`
+	AppRoot             string            `json:"appRoot"`
+	DefaultProdDataDir  string            `json:"defaultProdDataDir"`
+	PointsToDevRepo      bool              `json:"pointsToDevRepo"`
+	NeedsSetup          bool              `json:"needsSetup"`
+	Version             string            `json:"version"`
+	PythonPath          string            `json:"pythonPath"`
+	PythonPathEffective string            `json:"pythonPathEffective"`
+	NotifyEnvFound      bool              `json:"notifyEnvFound"`
+	NotifyScriptOk      bool              `json:"notifyScriptOk"`
+	SoundEnvFound       bool              `json:"soundEnvFound"`
+	SoundScriptOk       bool              `json:"soundScriptOk"`
+	Workers             []RemoteWorkerDTO `json:"workers"`
+	DeployRepoURL       string            `json:"deployRepoUrl"`
+	DeployRepoRef       string            `json:"deployRepoRef"`
+	DeployRepoMethod    string            `json:"deployRepoMethod"`
+	DeployRepoHasToken  bool              `json:"deployRepoHasToken"`
+	HubEnabled          bool              `json:"hubEnabled"`
+}
+
+type RemoteWorkerDTO struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Host          string `json:"host"`
+	Port          int    `json:"port"`
+	User          string `json:"user"`
+	AuthType      string `json:"authType"`
+	KeyPath       string `json:"keyPath"`
+	ExecMode      string `json:"execMode"`
+	APIPort       int    `json:"apiPort"`
+	Enabled       bool   `json:"enabled"`
+	HasPassword   bool   `json:"hasPassword"`
+	RemoteVersion string `json:"remoteVersion,omitempty"`
+}
+
+type RemoteWorkerTestResultDTO struct {
+	OK             bool   `json:"ok"`
+	RemoteVersion  string `json:"remoteVersion"`
+	Error          string `json:"error,omitempty"`
 }
 
 type SettingsSaveDTO struct {
-	DataDir        string `json:"dataDir"`
-	ScanDir        string `json:"scanDir"`
-	PythonPath     string `json:"pythonPath"`
-	NotifyEnvFound bool   `json:"notifyEnvFound"`
-	NotifyScriptOk bool   `json:"notifyScriptOk"`
-	SoundEnvFound  bool   `json:"soundEnvFound"`
-	SoundScriptOk  bool   `json:"soundScriptOk"`
+	DataDir        string            `json:"dataDir"`
+	ScanDir        string            `json:"scanDir"`
+	PythonPath     string            `json:"pythonPath"`
+	NotifyEnvFound bool              `json:"notifyEnvFound"`
+	NotifyScriptOk bool              `json:"notifyScriptOk"`
+	SoundEnvFound  bool              `json:"soundEnvFound"`
+	SoundScriptOk  bool              `json:"soundScriptOk"`
+	Workers        []RemoteWorkerSaveDTO `json:"workers"`
+	DeployRepoURL    string            `json:"deployRepoUrl"`
+	DeployRepoRef    string            `json:"deployRepoRef"`
+	DeployRepoToken  string            `json:"deployRepoToken"`
+	DeployRepoMethod string            `json:"deployRepoMethod"`
+	HubEnabled     bool              `json:"hubEnabled"`
+}
+
+type RemoteWorkerSaveDTO struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Host          string `json:"host"`
+	Port          int    `json:"port"`
+	User          string `json:"user"`
+	AuthType      string `json:"authType"`
+	Password      string `json:"password"`
+	KeyPath       string `json:"keyPath"`
+	KeyPassphrase string `json:"keyPassphrase"`
+	ExecMode      string `json:"execMode"`
+	APIPort       int    `json:"apiPort"`
+	APIToken      string `json:"apiToken"`
+	Enabled       bool   `json:"enabled"`
 }
 
 type activeScriptRun struct {
@@ -278,6 +349,7 @@ func (a *App) GetSettings() SettingsDTO {
 	notifyOk := user.NotifyScriptOkOrDefault()
 	soundEnv := user.SoundEnvFoundOrDefault()
 	soundOk := user.SoundScriptOkOrDefault()
+	hubEnabled := user.HubEnabledOrDefault()
 	return SettingsDTO{
 		Mode:                mode,
 		DataDir:             a.dataRoot,
@@ -293,7 +365,82 @@ func (a *App) GetSettings() SettingsDTO {
 		NotifyScriptOk:      notifyOk,
 		SoundEnvFound:       soundEnv,
 		SoundScriptOk:       soundOk,
+		Workers:             workersToDTO(user.Workers),
+		DeployRepoURL:       user.DeployRepo.URL,
+		DeployRepoRef:       user.DeployRepo.Ref,
+		DeployRepoMethod:    user.DeployRepo.Method,
+		DeployRepoHasToken:  user.DeployRepo.Token != "",
+		HubEnabled:          hubEnabled,
 	}
+}
+
+func workersToDTO(list []settings.RemoteWorker) []RemoteWorkerDTO {
+	out := make([]RemoteWorkerDTO, 0, len(list))
+	for _, w := range list {
+		w = w.Normalized()
+		out = append(out, RemoteWorkerDTO{
+			ID: w.ID, Name: w.Name, Host: w.Host, Port: w.Port, User: w.User,
+			AuthType: w.AuthType, KeyPath: w.KeyPath, ExecMode: w.ExecMode,
+			APIPort: w.APIPort, Enabled: w.Enabled, HasPassword: w.Password != "",
+		})
+	}
+	return out
+}
+
+func workerFromSaveDTO(d RemoteWorkerSaveDTO) settings.RemoteWorker {
+	return settings.RemoteWorker{
+		ID: d.ID, Name: d.Name, Host: d.Host, Port: d.Port, User: d.User,
+		AuthType: d.AuthType, Password: d.Password, KeyPath: d.KeyPath,
+		KeyPassphrase: d.KeyPassphrase, ExecMode: d.ExecMode, APIPort: d.APIPort,
+		APIToken: d.APIToken, Enabled: d.Enabled,
+	}.Normalized()
+}
+
+func (a *App) PickKeyFile(title, current string) (string, error) {
+	if a.wails == nil {
+		return "", fmt.Errorf("interface ainda não pronta")
+	}
+	start := current
+	if start == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			start = filepath.Join(home, ".ssh")
+		}
+	} else {
+		start = filepath.Dir(start)
+	}
+	dlg := a.wails.Dialog.OpenFile().
+		SetTitle(title).
+		SetDirectory(start).
+		CanChooseFiles(true).
+		CanChooseDirectories(false)
+	path, err := dlg.PromptForSingleSelection()
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(path) == "" {
+		return "", fmt.Errorf("nenhum ficheiro seleccionado")
+	}
+	return filepath.Clean(path), nil
+}
+
+func (a *App) TestRemoteWorker(w RemoteWorkerSaveDTO) RemoteWorkerTestResultDTO {
+	worker := workerFromSaveDTO(w)
+	if worker.Password == "" && w.ID != "" {
+		if user, err := settings.Load(); err == nil {
+			if prev, ok := user.WorkerByID(w.ID); ok && prev.Password != "" {
+				worker.Password = prev.Password
+			}
+		}
+	}
+	cfg := remoteworker.ConfigFrom(worker, a.repoRoot, paths.InstallVersion(a.repoRoot), userDeployRepo())
+	ver, err := remoteworker.TestConnection(cfg)
+	if err != nil {
+		return RemoteWorkerTestResultDTO{OK: false, Error: err.Error()}
+	}
+	if ver == "none" {
+		ver = ""
+	}
+	return RemoteWorkerTestResultDTO{OK: true, RemoteVersion: ver}
 }
 
 func (a *App) PickDirectory(title, current string) (string, error) {
@@ -410,13 +557,29 @@ func (a *App) SaveSettings(opts SettingsSaveDTO) error {
 		return fmt.Errorf("pasta de scan não pode ser o repo de dev")
 	}
 	ne, ns, se, ss := opts.NotifyEnvFound, opts.NotifyScriptOk, opts.SoundEnvFound, opts.SoundScriptOk
+	existing, _ := settings.Load()
+	workers := settings.MergeWorkers(existing.Workers, workersFromSaveDTO(opts.Workers))
+	deployRepo := settings.MergeDeployRepo(existing.DeployRepo, settings.DeployRepo{
+		URL: opts.DeployRepoURL, Ref: opts.DeployRepoRef,
+		Token: opts.DeployRepoToken, Method: opts.DeployRepoMethod,
+	})
+	hubEnabled := opts.HubEnabled
 	if err := settings.Save(settings.User{
 		DataDir: absData, ScanDir: absScan, PythonPath: pythonPath,
 		NotifyEnvFound: &ne, NotifyScriptOk: &ns, SoundEnvFound: &se, SoundScriptOk: &ss,
+		Workers: workers, DeployRepo: deployRepo, HubEnabled: &hubEnabled,
 	}); err != nil {
 		return err
 	}
 	return a.reloadStores()
+}
+
+func workersFromSaveDTO(list []RemoteWorkerSaveDTO) []settings.RemoteWorker {
+	out := make([]settings.RemoteWorker, 0, len(list))
+	for _, d := range list {
+		out = append(out, workerFromSaveDTO(d))
+	}
+	return out
 }
 
 func (a *App) OpenDataDirectory() error {
@@ -1045,6 +1208,21 @@ func (a *App) StartScan(opts ScanOptsDTO) error {
 		timeout = 8
 	}
 
+	includeLocal, remoteWorkers, err := a.resolveScanTargets(opts.Targets)
+	if err != nil {
+		a.scanMu.Lock()
+		a.scanCancel = nil
+		a.scanMu.Unlock()
+		return err
+	}
+
+	if len(remoteWorkers) > 0 {
+		a.emit("scan:progress", ScanProgressDTO{Running: true})
+		go a.runOrchestratedScan(ctx, dir, includeLocal, remoteWorkers, opts, threads, pathWorkers, timeout)
+		return nil
+	}
+
+	a.emit("scan:progress", ScanProgressDTO{Running: true})
 	cfg := &scanner.Config{
 		RepoRoot:    a.dataRoot,
 		Dir:         dir,
@@ -1068,35 +1246,195 @@ func (a *App) StartScan(opts ScanOptsDTO) error {
 		},
 		OnFound: func(r scanner.VulnResult) {
 			a.emit("scan:found", map[string]string{
-				"domain": r.Domain,
-				"url":    r.URL,
-				"path":   r.Path,
+				"domain":   r.Domain,
+				"url":      r.URL,
+				"path":     r.Path,
+				"workerId": "local",
 			})
 			a.emit("scan:output", fmt.Sprintf("FOUND %s %s (%s)", r.Domain, r.Path, r.URL))
 		},
 	}
 
 	go func() {
-		defer func() {
-			a.scanMu.Lock()
-			a.scanCancel = nil
-			a.scanMu.Unlock()
-			a.emit("scan:progress", ScanProgressDTO{Running: false})
-			a.emit("scan:output", "Scan concluído.")
-		}()
+		defer a.finishScan()
 		a.emit("scan:output", fmt.Sprintf("Iniciando scan em %s…", dir))
 		_ = scanner.Run(ctx, cfg)
+		a.emit("scan:output", "Scan concluído.")
 	}()
 	return nil
 }
 
+func (a *App) resolveScanTargets(targets []string) (includeLocal bool, workers []settings.RemoteWorker, err error) {
+	user, _ := settings.Load()
+	if len(targets) == 0 {
+		return true, nil, nil
+	}
+	seen := map[string]bool{}
+	for _, t := range targets {
+		t = strings.TrimSpace(t)
+		if t == "" {
+			continue
+		}
+		if t == "local" {
+			includeLocal = true
+			continue
+		}
+		w, ok := user.WorkerByID(t)
+		if !ok {
+			return false, nil, fmt.Errorf("worker desconhecido: %s", t)
+		}
+		if !w.Enabled {
+			return false, nil, fmt.Errorf("worker desactivado: %s", w.Name)
+		}
+		if seen[w.ID] {
+			continue
+		}
+		seen[w.ID] = true
+		workers = append(workers, w)
+	}
+	if !includeLocal && len(workers) == 0 {
+		return false, nil, fmt.Errorf("seleccione pelo menos um destino")
+	}
+	return includeLocal, workers, nil
+}
+
+func (a *App) runOrchestratedScan(ctx context.Context, dir string, includeLocal bool, remoteWorkers []settings.RemoteWorker, opts ScanOptsDTO, threads, pathWorkers, timeout int) {
+	defer a.finishScan()
+	runID := paths.NewBatchRunID()
+	a.emit("scan:output", fmt.Sprintf("Scan orquestrado %s…", runID))
+	user, _ := settings.Load()
+
+	// Mostrar workers imediatamente como "a preparar"
+	if includeLocal {
+		a.emit("scan:worker-progress", ScanWorkerProgressDTO{
+			WorkerID: "local", WorkerName: "Local", Status: "preparing", Running: true,
+		})
+	}
+	for _, w := range remoteWorkers {
+		a.emit("scan:worker-progress", ScanWorkerProgressDTO{
+			WorkerID: w.ID, WorkerName: w.Name, Status: "preparing", Running: true,
+		})
+	}
+	workerTotals := map[string]scanorch.WorkerProgress{}
+	var progressMu sync.Mutex
+	var sessionScanned int64
+	var sessionVulns int64
+	var chunkBatchSize int
+	emitAggregate := func() {
+		progressMu.Lock()
+		defer progressMu.Unlock()
+		var chunkScanned, vulns int64
+		active := 0
+		for _, p := range workerTotals {
+			chunkScanned += p.DomainsScanned
+			vulns += p.VulnsFound
+			if p.Running {
+				active++
+			}
+		}
+		if sessionVulns > vulns {
+			vulns = sessionVulns
+		}
+		centralPending := a.domainStore.CountPending(opts.Rescan)
+		totalSession := sessionScanned + chunkScanned
+		a.emit("scan:progress", ScanProgressDTO{
+			DomainsScanned: totalSession,
+			SessionScanned: sessionScanned,
+			WaveScanned:    chunkScanned,
+			VulnsFound:     vulns,
+			DomainsPending: centralPending,
+			WaveBatchSize:  chunkBatchSize,
+			Running:        active > 0,
+		})
+	}
+
+	err := scanorch.Run(scanorch.Options{
+		Ctx: ctx, AppRoot: a.repoRoot, DataRoot: a.dataRoot, ScanDir: dir,
+		DBPath: a.dbPath, FindingsDir: a.findingsDir,
+		LocalVersion: paths.InstallVersion(a.repoRoot), RunID: runID,
+		IncludeLocal: includeLocal, RemoteWorkers: remoteWorkers,
+		DeployBefore: opts.DeployRemote, DeployRepo: userDeployRepo(), HubEnabled: user.HubEnabledOrDefault(),
+		Threads: threads, PathWorkers: pathWorkers, Fast: opts.Fast, Rescan: opts.Rescan, TimeoutSec: timeout,
+		Findings: a.findings, Domains: a.domainStore,
+		OnOutput: func(line string) { a.emit("scan:output", line) },
+		OnWorkerChunkComplete: func(_ string, chunkSize int, _ int64) {
+			progressMu.Lock()
+			sessionScanned += int64(chunkSize)
+			chunkBatchSize = chunkSize
+			progressMu.Unlock()
+			emitAggregate()
+		},
+		OnWorkerProgress: func(p scanorch.WorkerProgress) {
+			progressMu.Lock()
+			if prev, ok := workerTotals[p.WorkerID]; ok {
+				newChunk := p.Status == "preparing" ||
+					(p.DomainsScanned == 0 && prev.DomainsTotal > 0 && prev.DomainsScanned >= prev.DomainsTotal)
+				if !newChunk && p.DomainsTotal > 0 && p.DomainsTotal == prev.DomainsTotal {
+					if p.DomainsScanned < prev.DomainsScanned {
+						p.DomainsScanned = prev.DomainsScanned
+					}
+					if p.VulnsFound < prev.VulnsFound {
+						p.VulnsFound = prev.VulnsFound
+					}
+				}
+			}
+			workerTotals[p.WorkerID] = p
+			progressMu.Unlock()
+			a.emit("scan:worker-progress", ScanWorkerProgressDTO{
+				WorkerID: p.WorkerID, WorkerName: p.WorkerName,
+				DomainsScanned: p.DomainsScanned, VulnsFound: p.VulnsFound,
+				DomainsTotal: p.DomainsTotal, Status: p.Status, Error: p.Error, Running: p.Running,
+				PhasePercent: p.PhasePercent, PhaseLabel: p.PhaseLabel,
+			})
+			emitAggregate()
+		},
+		OnFound: func(workerID, domain, path, url string, isNew bool) {
+			if isNew {
+				progressMu.Lock()
+				sessionVulns++
+				progressMu.Unlock()
+			}
+			a.emit("scan:found", map[string]any{
+				"domain": domain, "url": url, "path": path, "workerId": workerID, "isNew": isNew,
+			})
+			emitAggregate()
+		},
+	})
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			a.emit("scan:output", "Scan cancelado.")
+		} else {
+			a.emit("scan:output", "Erro: "+err.Error())
+		}
+	} else {
+		a.emit("scan:output", "Scan concluído.")
+	}
+	a.emit("scan:findings-refresh", struct{}{})
+}
+
+func userDeployRepo() settings.DeployRepo {
+	user, _ := settings.Load()
+	return user.DeployRepo.Normalized()
+}
+
+func (a *App) finishScan() {
+	a.scanMu.Lock()
+	a.scanCancel = nil
+	a.scanMu.Unlock()
+	a.emit("scan:progress", ScanProgressDTO{Running: false})
+}
+
 func (a *App) CancelScan() {
 	a.scanMu.Lock()
-	defer a.scanMu.Unlock()
-	if a.scanCancel != nil {
-		a.scanCancel()
-		a.scanCancel = nil
+	cancel := a.scanCancel
+	a.scanCancel = nil
+	a.scanMu.Unlock()
+	if cancel == nil {
+		return
 	}
+	cancel()
+	a.emit("scan:progress", ScanProgressDTO{Running: false})
+	a.emit("scan:output", "A parar scan…")
 }
 
 func (a *App) Shutdown() {

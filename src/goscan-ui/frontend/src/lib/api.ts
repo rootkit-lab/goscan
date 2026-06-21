@@ -39,6 +39,21 @@ export type ScanOptsDTO = {
   fast?: boolean;
   rescan?: boolean;
   timeoutSec?: number;
+  targets?: string[];
+  deployRemote?: boolean;
+};
+
+export type ScanWorkerProgressDTO = {
+  workerId: string;
+  workerName: string;
+  domainsScanned: number;
+  vulnsFound: number;
+  domainsTotal: number;
+  status: string;
+  error?: string;
+  running: boolean;
+  phasePercent?: number;
+  phaseLabel?: string;
 };
 
 export type ScanProgressDTO = {
@@ -46,6 +61,10 @@ export type ScanProgressDTO = {
   vulnsFound: number;
   domainsNew: number;
   domainsPending: number;
+  wave?: number;
+  waveBatchSize?: number;
+  waveScanned?: number;
+  sessionScanned?: number;
   running: boolean;
 };
 
@@ -133,6 +152,49 @@ export type SettingsDTO = {
   notifyScriptOk: boolean;
   soundEnvFound: boolean;
   soundScriptOk: boolean;
+  workers: RemoteWorkerDTO[];
+  deployRepoUrl: string;
+  deployRepoRef: string;
+  deployRepoMethod: string;
+  deployRepoHasToken: boolean;
+  hubEnabled: boolean;
+};
+
+export type RemoteWorkerDTO = {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  user: string;
+  authType: string;
+  keyPath: string;
+  execMode: string;
+  apiPort: number;
+  enabled: boolean;
+  hasPassword: boolean;
+  remoteVersion?: string;
+};
+
+export type RemoteWorkerSaveDTO = {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  user: string;
+  authType: string;
+  password: string;
+  keyPath: string;
+  keyPassphrase: string;
+  execMode: string;
+  apiPort: number;
+  apiToken: string;
+  enabled: boolean;
+};
+
+export type RemoteWorkerTestResultDTO = {
+  ok: boolean;
+  remoteVersion: string;
+  error?: string;
 };
 
 export type SettingsSaveDTO = {
@@ -143,6 +205,12 @@ export type SettingsSaveDTO = {
   notifyScriptOk: boolean;
   soundEnvFound: boolean;
   soundScriptOk: boolean;
+  workers: RemoteWorkerSaveDTO[];
+  deployRepoUrl: string;
+  deployRepoRef: string;
+  deployRepoToken: string;
+  deployRepoMethod: string;
+  hubEnabled: boolean;
 };
 
 const S = "main.App";
@@ -174,6 +242,10 @@ export const api = {
     Call.ByName(`${S}.PickDirectory`, title, current) as Promise<string>,
   pickPythonExecutable: (current: string) =>
     Call.ByName(`${S}.PickPythonExecutable`, current) as Promise<string>,
+  pickKeyFile: (title: string, current: string) =>
+    Call.ByName(`${S}.PickKeyFile`, title, current) as Promise<string>,
+  testRemoteWorker: (worker: RemoteWorkerSaveDTO) =>
+    Call.ByName(`${S}.TestRemoteWorker`, worker) as Promise<RemoteWorkerTestResultDTO>,
   saveSettings: (opts: SettingsSaveDTO) => Call.ByName(`${S}.SaveSettings`, opts) as Promise<void>,
   openDataDirectory: () => Call.ByName(`${S}.OpenDataDirectory`) as Promise<void>,
   openScanDirectory: () => Call.ByName(`${S}.OpenScanDirectory`) as Promise<void>,

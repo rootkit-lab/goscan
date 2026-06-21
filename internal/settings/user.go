@@ -15,8 +15,11 @@ type User struct {
 	PythonPath     string `yaml:"python_path,omitempty"`
 	NotifyEnvFound *bool  `yaml:"notify_env_found,omitempty"`
 	NotifyScriptOk *bool  `yaml:"notify_script_ok,omitempty"`
-	SoundEnvFound  *bool  `yaml:"sound_env_found,omitempty"`
-	SoundScriptOk  *bool  `yaml:"sound_script_ok,omitempty"`
+	SoundEnvFound  *bool           `yaml:"sound_env_found,omitempty"`
+	SoundScriptOk  *bool           `yaml:"sound_script_ok,omitempty"`
+	Workers        []RemoteWorker  `yaml:"workers,omitempty"`
+	DeployRepo     DeployRepo      `yaml:"deploy_repo,omitempty"`
+	HubEnabled     *bool           `yaml:"hub_enabled,omitempty"`
 }
 
 func configPath() (string, error) {
@@ -88,6 +91,10 @@ func Save(u User) error {
 	if err != nil {
 		return err
 	}
+	if u.HubEnabled == nil {
+		def := true
+		u.HubEnabled = &def
+	}
 	u.DataDir = strings.TrimSpace(u.DataDir)
 	u.ScanDir = strings.TrimSpace(u.ScanDir)
 	u.PythonPath = strings.TrimSpace(u.PythonPath)
@@ -95,7 +102,43 @@ func Save(u User) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, body, 0644)
+	return os.WriteFile(path, body, 0600)
+}
+
+// MergeWorkers preserves secrets when the UI omits them on save.
+func MergeWorkers(existing, incoming []RemoteWorker) []RemoteWorker {
+	byID := make(map[string]RemoteWorker, len(existing))
+	for _, w := range existing {
+		w = w.Normalized()
+		byID[w.ID] = w
+	}
+	out := make([]RemoteWorker, 0, len(incoming))
+	for _, w := range incoming {
+		w = w.Normalized()
+		if prev, ok := byID[w.ID]; ok {
+			if w.Password == "" {
+				w.Password = prev.Password
+			}
+			if w.KeyPassphrase == "" {
+				w.KeyPassphrase = prev.KeyPassphrase
+			}
+			if w.APIToken == "" {
+				w.APIToken = prev.APIToken
+			}
+		}
+		out = append(out, w)
+	}
+	return out
+}
+
+func (u User) WorkerByID(id string) (RemoteWorker, bool) {
+	id = strings.TrimSpace(id)
+	for _, w := range u.Workers {
+		if w.Normalized().ID == id {
+			return w.Normalized(), true
+		}
+	}
+	return RemoteWorker{}, false
 }
 
 // NotifyEnvFoundOrDefault returns whether to notify when a new .env is found.
@@ -104,6 +147,14 @@ func (u User) NotifyEnvFoundOrDefault() bool {
 		return *u.NotifyEnvFound
 	}
 	return true
+}
+
+// HubEnabledOrDefault returns if the hub/socket streaming is enabled.
+func (u User) HubEnabledOrDefault() bool {
+	if u.HubEnabled == nil {
+		return true
+	}
+	return *u.HubEnabled
 }
 
 // NotifyScriptOkOrDefault returns whether to notify when a checker succeeds.

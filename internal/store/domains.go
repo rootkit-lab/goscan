@@ -2,7 +2,9 @@ package store
 
 import (
 	"bufio"
+	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -50,6 +52,10 @@ func OpenDomainStore(path string) (*DomainStore, error) {
 	db.Exec(`ALTER TABLE domains ADD COLUMN scanned_at TEXT`)
 
 	s := &DomainStore{db: db, cache: make(map[string]*domainState)}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_domains_pending ON domains(scanned_at) WHERE scanned_at IS NULL`); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if err := s.loadCache(); err != nil {
 		db.Close()
 		return nil, err
@@ -114,6 +120,10 @@ func (s *DomainStore) ScannedCount() int64 {
 }
 
 func (s *DomainStore) PendingCount() int64 {
+	var n int64
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM domains WHERE scanned_at IS NULL`).Scan(&n); err == nil {
+		return n
+	}
 	return s.Count() - s.ScannedCount()
 }
 
@@ -163,6 +173,34 @@ func (s *DomainStore) Flush() error {
 		}
 	}
 	return tx.Commit()
+}
+
+// ImportBatch inserts many new domains in one flush cycle (optimized for bulk ingest).
+func (s *DomainStore) ImportBatch(domains []string, sourceFile string) (int, error) {
+	if len(domains) == 0 {
+		return 0, nil
+	}
+	s.mu.Lock()
+	added := 0
+	for _, domain := range domains {
+		if domain == "" {
+			continue
+		}
+		if _, ok := s.cache[domain]; ok {
+			continue
+		}
+		s.cache[domain] = &domainState{}
+		s.batch = append(s.batch, [2]string{domain, sourceFile})
+		added++
+	}
+	if added > 0 {
+		atomic.AddInt64(&s.count, int64(added))
+	}
+	s.mu.Unlock()
+	if added == 0 {
+		return 0, nil
+	}
+	return added, s.Flush()
 }
 
 func (s *DomainStore) MarkScanned(domain string) {
@@ -244,6 +282,228 @@ func (s *DomainStore) ExportTXT(path string) error {
 		}
 		if _, err := writer.WriteString(d + "\n"); err != nil {
 			return err
+		}
+	}
+	return rows.Err()
+}
+
+// CountPending returns domains eligible for scan (pending or all if rescan).
+func (s *DomainStore) CountPending(rescan bool) int64 {
+	if rescan {
+		return s.Count()
+	}
+	return s.PendingCount()
+}
+
+// FetchWorkerChunk returns up to limit pending domains for a stable worker partition (rowid % workerCount).
+func (s *DomainStore) FetchWorkerChunk(workerIndex, workerCount, limit int, rescan bool) ([]string, error) {
+	if workerCount <= 0 || limit <= 0 {
+		return nil, nil
+	}
+	if workerIndex < 0 || workerIndex >= workerCount {
+		return nil, fmt.Errorf("workerIndex %d fora de [0,%d)", workerIndex, workerCount)
+	}
+	var q string
+	if rescan {
+		q = `SELECT domain FROM domains WHERE (rowid % ?) = ? ORDER BY rowid LIMIT ?`
+	} else {
+		q = `SELECT domain FROM domains WHERE scanned_at IS NULL AND (rowid % ?) = ? ORDER BY rowid LIMIT ?`
+	}
+	rows, err := s.db.Query(q, workerCount, workerIndex, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]string, 0, limit)
+	for rows.Next() {
+		var d string
+		if err := rows.Scan(&d); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// FetchPendingLimit returns up to limit pending domains from the central store (ordered).
+func (s *DomainStore) FetchPendingLimit(limit int, rescan bool) ([]string, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	var q string
+	if rescan {
+		q = `SELECT domain FROM domains ORDER BY rowid LIMIT ?`
+	} else {
+		q = `SELECT domain FROM domains WHERE scanned_at IS NULL ORDER BY rowid LIMIT ?`
+	}
+	rows, err := s.db.Query(q, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]string, 0, limit)
+	for rows.Next() {
+		var d string
+		if err := rows.Scan(&d); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// MarkScannedList marks specific domains as scanned in the central store.
+func (s *DomainStore) MarkScannedList(domains []string) error {
+	const batchSize = 500
+	for i := 0; i < len(domains); i += batchSize {
+		end := i + batchSize
+		if end > len(domains) {
+			end = len(domains)
+		}
+		batch := domains[i:end]
+		tx, err := s.db.Begin()
+		if err != nil {
+			return err
+		}
+		stmt, err := tx.Prepare(`UPDATE domains SET scanned_at = datetime('now') WHERE domain = ? AND scanned_at IS NULL`)
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
+		for _, d := range batch {
+			if _, err := stmt.Exec(d); err != nil {
+				stmt.Close()
+				tx.Rollback()
+				return err
+			}
+		}
+		stmt.Close()
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		s.mu.Lock()
+		for _, d := range batch {
+			if st, ok := s.cache[d]; ok {
+				st.scanned = true
+			}
+		}
+		s.mu.Unlock()
+	}
+	return nil
+}
+
+// workerPartitionSubquery assigns pending domains round-robin by order (not rowid parity).
+func workerPartitionSubquery(rescan bool) string {
+	if rescan {
+		return `SELECT domain, (ROW_NUMBER() OVER (ORDER BY rowid) - 1) AS ord FROM domains`
+	}
+	return `SELECT domain, (ROW_NUMBER() OVER (ORDER BY rowid) - 1) AS ord FROM domains WHERE scanned_at IS NULL`
+}
+
+// CountWorkerChunk returns how many domains a worker partition has (stable rowid assignment).
+func (s *DomainStore) CountWorkerChunk(workerIndex, workerCount int, rescan bool) int64 {
+	if workerCount <= 0 {
+		return 0
+	}
+	var q string
+	if rescan {
+		q = `SELECT COUNT(*) FROM domains WHERE (rowid % ?) = ?`
+	} else {
+		q = `SELECT COUNT(*) FROM domains WHERE scanned_at IS NULL AND (rowid % ?) = ?`
+	}
+	var n int64
+	if err := s.db.QueryRow(q, workerCount, workerIndex).Scan(&n); err != nil {
+		return 0
+	}
+	return n
+}
+
+// WriteWorkerChunkDir streams a worker partition from SQLite into chunk/domains.txt.
+func (s *DomainStore) WriteWorkerChunkDir(ctx context.Context, workerIndex, workerCount int, rescan bool) (dir string, cleanup func(), count int, err error) {
+	if workerCount <= 0 {
+		return "", nil, 0, fmt.Errorf("workerCount inválido")
+	}
+	dir, err = os.MkdirTemp("", "goscan-chunk-*")
+	if err != nil {
+		return "", nil, 0, err
+	}
+	cleanup = func() { _ = os.RemoveAll(dir) }
+
+	path := filepath.Join(dir, "domains.txt")
+	f, err := os.Create(path)
+	if err != nil {
+		cleanup()
+		return "", nil, 0, err
+	}
+	w := bufio.NewWriterSize(f, 256*1024)
+
+	q := `SELECT domain FROM (` + workerPartitionSubquery(rescan) + `) WHERE (ord % ?) = ?`
+	rows, err := s.db.Query(q, workerCount, workerIndex)
+	if err != nil {
+		f.Close()
+		cleanup()
+		return "", nil, 0, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		if ctx.Err() != nil {
+			f.Close()
+			cleanup()
+			return "", nil, count, ctx.Err()
+		}
+		var d string
+		if err := rows.Scan(&d); err != nil {
+			f.Close()
+			cleanup()
+			return "", nil, 0, err
+		}
+		if _, err := w.WriteString(d + "\n"); err != nil {
+			f.Close()
+			cleanup()
+			return "", nil, 0, err
+		}
+		count++
+	}
+	if err := rows.Err(); err != nil {
+		f.Close()
+		cleanup()
+		return "", nil, 0, err
+	}
+	if err := w.Flush(); err != nil {
+		f.Close()
+		cleanup()
+		return "", nil, 0, err
+	}
+	if err := f.Close(); err != nil {
+		cleanup()
+		return "", nil, 0, err
+	}
+	return dir, cleanup, count, nil
+}
+
+// MarkScannedForWorker marks all domains in a worker partition as scanned.
+func (s *DomainStore) MarkScannedForWorker(workerIndex, workerCount int, rescan bool) error {
+	q := `UPDATE domains SET scanned_at = datetime('now') WHERE domain IN (
+		SELECT domain FROM (` + workerPartitionSubquery(rescan) + `) WHERE (ord % ?) = ?
+	)`
+	if _, err := s.db.Exec(q, workerCount, workerIndex); err != nil {
+		return err
+	}
+	rows, err := s.db.Query(`SELECT domain FROM (`+workerPartitionSubquery(rescan)+`) WHERE (ord % ?) = ?`, workerCount, workerIndex)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for rows.Next() {
+		var d string
+		if err := rows.Scan(&d); err != nil {
+			return err
+		}
+		if st, ok := s.cache[d]; ok {
+			st.scanned = true
 		}
 	}
 	return rows.Err()

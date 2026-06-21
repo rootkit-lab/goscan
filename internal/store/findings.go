@@ -181,14 +181,14 @@ func ParseLegacyFilename(name string) (domain, path string, ok bool) {
 	return domain, path, true
 }
 
-// SaveFinding writes content to by-domain/ and inserts DB row. Returns finding ID.
-func (fs *FindingsStore) SaveFinding(domain, path, url, confidence, scanRunID string, content []byte, hasCredentials bool) (int64, string, error) {
+// SaveFinding writes content to by-domain/ and inserts DB row. Returns finding ID and whether it is new.
+func (fs *FindingsStore) SaveFinding(domain, path, url, confidence, scanRunID string, content []byte, hasCredentials bool) (int64, string, bool, error) {
 	hash := ContentHash(content)
 	rel := DomainFileName(domain, path)
 	abs := filepath.Join(fs.findingsDir, "by-domain", rel)
 
 	if err := os.MkdirAll(filepath.Dir(abs), 0755); err != nil {
-		return 0, "", err
+		return 0, "", false, err
 	}
 
 	var existingID int64
@@ -197,11 +197,11 @@ func (fs *FindingsStore) SaveFinding(domain, path, url, confidence, scanRunID st
 		domain, path, hash,
 	).Scan(&existingID)
 	if err == nil {
-		return existingID, rel, nil
+		return existingID, rel, false, nil
 	}
 
 	if err := os.WriteFile(abs, content, 0644); err != nil {
-		return 0, "", err
+		return 0, "", false, err
 	}
 
 	hc := 0
@@ -213,10 +213,10 @@ func (fs *FindingsStore) SaveFinding(domain, path, url, confidence, scanRunID st
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		domain, path, url, confidence, rel, scanRunID, hc, hash, string(content))
 	if err != nil {
-		return 0, "", err
+		return 0, "", false, err
 	}
 	id, _ := res.LastInsertId()
-	return id, rel, nil
+	return id, rel, true, nil
 }
 
 func (fs *FindingsStore) Get(id int64) (*Finding, string, error) {
@@ -297,7 +297,7 @@ func (fs *FindingsStore) ImportLegacyFile(scanRunID, legacyName string, content 
 	if !ok {
 		return false, fmt.Errorf("parse filename: %s", legacyName)
 	}
-	_, rel, err := fs.SaveFinding(domain, path, url, confidence, scanRunID, content, hasCredentials)
+	_, rel, _, err := fs.SaveFinding(domain, path, url, confidence, scanRunID, content, hasCredentials)
 	if err != nil {
 		return false, err
 	}

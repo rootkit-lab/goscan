@@ -38,6 +38,8 @@ files/dominios_unicos.txt
 # Go build
 /bin/
 /out/
+/goscan-ui
+/dist/worker-release/
 
 # Node / frontend
 node_modules/

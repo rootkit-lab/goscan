@@ -4,12 +4,15 @@ import { useEffect, useRef } from "react";
 import { clsx } from "clsx";
 import { CheckerStatusIcon } from "@/components/checkers/CheckerStatusIcon";
 import { ResizablePanel } from "@/components/layout/ResizablePanel";
-import type { ScriptCheckerStatusDTO } from "@/lib/api";
+import type { ScanWorkerProgressDTO, ScriptCheckerStatusDTO } from "@/lib/api";
+import { ScanLogView } from "@/components/terminal/ScanLogView";
 import { scriptIcon, statusTitle, type CheckerStatus } from "@/lib/scriptIcons";
 
-export type BottomTab = "output" | "terminal" | "results" | "batch-log";
+export type BottomTab = "output" | "terminal" | "results" | "batch-log" | "scan-log";
 
 export const BATCH_BOTTOM_TABS: BottomTab[] = ["batch-log"];
+export const SCAN_BOTTOM_TABS: BottomTab[] = ["scan-log"];
+export const FINDINGS_BOTTOM_TABS: BottomTab[] = ["scan-log", "batch-log"];
 export const EDITOR_BOTTOM_TABS: BottomTab[] = ["terminal", "results"];
 
 type Props = {
@@ -18,8 +21,16 @@ type Props = {
   onTabChange: (tab: BottomTab) => void;
   outputLines: string[];
   batchLogLines: string[];
+  scanLogLines?: string[];
+  scanLogFilter?: string;
+  onScanLogFilterChange?: (v: string) => void;
+  scanWorkers?: ScanWorkerProgressDTO[];
+  scanRunning?: boolean;
+  onCancelScan?: () => void;
+  onRestartScan?: () => void;
   onClearOutput: () => void;
   onClearBatchLog: () => void;
+  onClearScanLog?: () => void;
   logLines?: string[];
   onClearLog?: () => void;
   termRef?: RefObject<HTMLDivElement | null>;
@@ -39,8 +50,16 @@ export function BottomPanel({
   onTabChange,
   outputLines,
   batchLogLines,
+  scanLogLines = [],
+  scanLogFilter = "all",
+  onScanLogFilterChange,
+  scanWorkers = [],
+  scanRunning = false,
+  onCancelScan,
+  onRestartScan,
   onClearOutput,
   onClearBatchLog,
+  onClearScanLog,
   logLines,
   onClearLog,
   termRef,
@@ -56,6 +75,8 @@ export function BottomPanel({
   const scrollRef = useRef<HTMLDivElement>(null);
   const logScrollRef = useRef<HTMLDivElement>(null);
   const batchScrollRef = useRef<HTMLDivElement>(null);
+  const scanScrollRef = useRef<HTMLDivElement>(null);
+  const useScanXterm = tabs.includes("scan-log") && onScanLogFilterChange !== undefined;
   const hasLog = tabs.includes("terminal") && logLines !== undefined;
   const hasTerminal = tabs.includes("terminal") && !!termRef && !hasLog;
 
@@ -68,11 +89,15 @@ export function BottomPanel({
       const el = batchScrollRef.current;
       if (el) el.scrollTop = el.scrollHeight;
     }
+    if (tab === "scan-log" && !useScanXterm) {
+      const el = scanScrollRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    }
     if (tab === "terminal" && hasLog) {
       const el = logScrollRef.current;
       if (el) el.scrollTop = el.scrollHeight;
     }
-  }, [outputLines, batchLogLines, logLines, tab, hasLog]);
+  }, [outputLines, batchLogLines, scanLogLines, logLines, tab, hasLog]);
 
   const copyContent = () => {
     if (tab === "output") {
@@ -81,6 +106,10 @@ export function BottomPanel({
     }
     if (tab === "batch-log") {
       void navigator.clipboard.writeText(batchLogLines.join("\n"));
+      return;
+    }
+    if (tab === "scan-log") {
+      void navigator.clipboard.writeText(scanLogLines.join("\n"));
       return;
     }
     if (tab === "results") {
@@ -100,6 +129,7 @@ export function BottomPanel({
   const clearContent = () => {
     if (tab === "output") onClearOutput();
     else if (tab === "batch-log") onClearBatchLog();
+    else if (tab === "scan-log") onClearScanLog?.();
     else if (tab === "terminal" && hasLog) onClearLog?.();
     else if (tab === "terminal") onClearTerminal?.();
   };
@@ -114,7 +144,7 @@ export function BottomPanel({
       maxHeight={520}
       headerRight={
         <span className="flex w-full items-center justify-between gap-2">
-          <TabBar tab={tab} tabs={tabs} onTabChange={onTabChange} terminalActive={terminalActive} />
+          <TabBar tab={tab} tabs={tabs} onTabChange={onTabChange} terminalActive={terminalActive} scanRunning={scanRunning} />
           <span className="flex shrink-0 gap-1">
             {tab === "batch-log" && batchLogDir && onOpenBatchLogs ? (
               <button
@@ -185,6 +215,38 @@ export function BottomPanel({
             ref={termRef as React.RefObject<HTMLDivElement>}
             className={clsx("absolute inset-0 w-full", tab !== "terminal" && "hidden")}
           />
+        )}
+
+        {tabs.includes("scan-log") && (
+          <div className={clsx("absolute inset-0 min-h-0", tab !== "scan-log" && "hidden")}>
+            {useScanXterm ? (
+              <ScanLogView
+                lines={scanLogLines}
+                filter={scanLogFilter}
+                onFilterChange={onScanLogFilterChange!}
+                workers={scanWorkers}
+                scanRunning={scanRunning}
+                onCancelScan={onCancelScan}
+                onRestartScan={onRestartScan}
+                onClear={onClearScanLog}
+              />
+            ) : (
+              <div
+                ref={scanScrollRef}
+                className="h-full overflow-auto font-mono text-[12px] leading-relaxed text-gs-fg"
+              >
+                {scanLogLines.length === 0 ? (
+                  <span className="text-gs-muted">Log do scan (local e remoto) aparece aqui ao iniciar um scan.</span>
+                ) : (
+                  scanLogLines.map((line, i) => (
+                    <div key={i} className="whitespace-pre-wrap break-all">
+                      {line}
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
         )}
 
         {tabs.includes("batch-log") && (
@@ -264,19 +326,22 @@ const TAB_LABELS: Record<BottomTab, string> = {
   output: "Output",
   terminal: "Log",
   results: "Resultados",
-  "batch-log": "Batch log"
+  "batch-log": "Batch",
+  "scan-log": "Scan"
 };
 
 function TabBar({
   tab,
   tabs,
   onTabChange,
-  terminalActive
+  terminalActive,
+  scanRunning
 }: {
   tab: BottomTab;
   tabs: BottomTab[];
   onTabChange: (t: BottomTab) => void;
   terminalActive: boolean;
+  scanRunning?: boolean;
 }) {
   return (
     <span className="flex items-end gap-0 normal-case tracking-normal">
@@ -285,7 +350,7 @@ function TabBar({
           key={t}
           active={tab === t}
           onClick={() => onTabChange(t)}
-          pulse={t === "terminal" && terminalActive && tab !== "terminal"}
+          pulse={t === "scan-log" && scanRunning && tab !== "scan-log"}
         >
           {TAB_LABELS[t]}
         </TabButton>

@@ -288,7 +288,10 @@ func BatchLogsRoot(dataRoot string) string {
 func InstallVersion(appRoot string) string {
 	b, err := os.ReadFile(filepath.Join(appRoot, "VERSION"))
 	if err != nil {
-		return ""
+		b, err = os.ReadFile(filepath.Join(appRoot, "assets", "VERSION"))
+		if err != nil {
+			return ""
+		}
 	}
 	return strings.TrimSpace(string(b))
 }

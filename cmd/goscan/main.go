@@ -30,6 +30,10 @@ func main() {
 			os.Args = append([]string{os.Args[0]}, os.Args[2:]...)
 			runBatchAnalyzeCLI()
 			return
+		case "worker":
+			os.Args = append([]string{os.Args[0]}, os.Args[2:]...)
+			runWorkerCLI()
+			return
 		}
 	}
 	runScanCLI()
@@ -63,7 +67,13 @@ func runScanCLI() {
 	flag.BoolVar(&cfg.ScanVulns, "vuln", true, "Escanear vulnerabilidades")
 	flag.BoolVar(&cfg.SaveContent, "save", true, "Salvar conteúdo .env")
 	timeout := flag.Int("timeout", 8, "Timeout HTTP (s)")
+	showVersion := flag.Bool("version", false, "Mostrar versão")
 	flag.Parse()
+	if *showVersion {
+		appRoot, _ := resolveRoots()
+		fmt.Println(paths.InstallVersion(appRoot))
+		return
+	}
 	cfg.Timeout = time.Duration(*timeout) * time.Second
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -77,6 +87,11 @@ func runScanCLI() {
 
 func runFindingsCLI() {
 	_, dataRoot := resolveRoots()
+	if len(os.Args) > 1 && os.Args[1] == "export-json" {
+		os.Args = append([]string{os.Args[0]}, os.Args[2:]...)
+		runFindingsExportJSON()
+		return
+	}
 	dbPath := paths.DefaultDBPath(dataRoot)
 	findingsDir := paths.FindingsRoot(dataRoot)
 	query := flag.String("query", "", "Pesquisa FTS (domínio/conteúdo)")

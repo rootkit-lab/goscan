@@ -1,5 +1,7 @@
 import { Bell, FolderOpen, Save, Terminal } from "lucide-react";
 import { ViewShell } from "@/components/layout/ViewShell";
+import { RemoteWorkersSection, type DraftWorker } from "@/components/settings/RemoteWorkersSection";
+import { DeployRepoSection } from "@/components/settings/DeployRepoSection";
 import type { SettingsDTO } from "@/lib/api";
 
 type Props = {
@@ -11,6 +13,18 @@ type Props = {
   draftNotifyScriptOk: boolean;
   draftSoundEnvFound: boolean;
   draftSoundScriptOk: boolean;
+  draftHubEnabled: boolean;
+  draftWorkers: DraftWorker[];
+  draftDeployRepoUrl: string;
+  draftDeployRepoRef: string;
+  draftDeployRepoToken: string;
+  draftDeployRepoMethod: string;
+  deployRepoHasToken: boolean;
+  onDraftWorkersChange: (workers: DraftWorker[]) => void;
+  onDeployRepoChange: (patch: { url?: string; ref?: string; method?: string; token?: string }) => void;
+  onDraftHubEnabledChange: (v: boolean) => void;
+  onPickKey: (index: number) => void;
+  onTestWorker: (index: number) => void;
   onDraftDataDirChange: (v: string) => void;
   onDraftScanDirChange: (v: string) => void;
   onDraftPythonPathChange: (v: string) => void;
@@ -81,6 +95,18 @@ export function SettingsView({
   draftNotifyScriptOk,
   draftSoundEnvFound,
   draftSoundScriptOk,
+  draftHubEnabled,
+  draftWorkers,
+  draftDeployRepoUrl,
+  draftDeployRepoRef,
+  draftDeployRepoToken,
+  draftDeployRepoMethod,
+  deployRepoHasToken,
+  onDraftWorkersChange,
+  onDeployRepoChange,
+  onDraftHubEnabledChange,
+  onPickKey,
+  onTestWorker,
   onDraftDataDirChange,
   onDraftScanDirChange,
   onDraftPythonPathChange,
@@ -202,6 +228,42 @@ export function SettingsView({
             />
           </div>
         </Section>
+
+        <DeployRepoSection
+          url={draftDeployRepoUrl}
+          repoRef={draftDeployRepoRef}
+          method={draftDeployRepoMethod}
+          token={draftDeployRepoToken}
+          hasToken={deployRepoHasToken}
+          disabled={saving}
+          onChange={onDeployRepoChange}
+        />
+
+        <Section title="Hub remoto (stream em tempo real)">
+          <label className="flex cursor-pointer items-start gap-3 rounded-md border border-gs-border/60 px-2 py-2 hover:border-gs-border">
+            <input
+              type="checkbox"
+              className="mt-0.5 accent-[var(--gs-accent)]"
+              checked={draftHubEnabled}
+              disabled={saving}
+              onChange={(e) => onDraftHubEnabledChange(e.target.checked)}
+            />
+            <span className="min-w-0">
+              <span className="block text-[12px] font-medium text-gs-fg">Activar hub (socket)</span>
+              <span className="block text-[10px] text-gs-muted">
+                Recebe progresso e conteúdo .env em tempo real via túnel SSH. Desactive para usar apenas stderr/export.
+              </span>
+            </span>
+          </label>
+        </Section>
+
+        <RemoteWorkersSection
+          workers={draftWorkers}
+          onChange={onDraftWorkersChange}
+          onPickKey={onPickKey}
+          onTest={onTestWorker}
+          disabled={saving}
+        />
 
         <button
           type="button"
