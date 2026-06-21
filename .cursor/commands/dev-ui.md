@@ -5,7 +5,7 @@ Arrancar ou diagnosticar a UI Wails (estilo VS Code).
 ## Arrancar
 
 ```bash
-cd /home/wiz/Projects/goscan
+cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 make dev-ui
 # porta alternativa:
 make dev-ui GOSCAN_UI_PORT=9282

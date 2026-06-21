@@ -5,7 +5,7 @@ Preparar ambiente de desenvolvimento goscan do zero (ou reparar venv/build em fa
 ## Executar (por ordem)
 
 ```bash
-cd /home/wiz/Projects/goscan
+cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 make scripts-venv
 make build
 make test

@@ -2,6 +2,7 @@ package remoteworker
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"strings"
 
@@ -73,18 +74,53 @@ func lineAfterMarker(lines []string, marker string) (string, bool) {
 }
 
 func runSession(client *ssh.Client, cmd string) (string, error) {
+	return runSessionCtx(context.Background(), client, cmd)
+}
+
+func runSessionCtx(ctx context.Context, client *ssh.Client, cmd string) (string, error) {
+	return runSessionCtxIO(ctx, client, cmd, false)
+}
+
+func runSessionStdoutCtx(ctx context.Context, client *ssh.Client, cmd string) (string, error) {
+	return runSessionCtxIO(ctx, client, cmd, true)
+}
+
+func runSessionCtxIO(ctx context.Context, client *ssh.Client, cmd string, stdoutOnly bool) (string, error) {
 	session, err := client.NewSession()
 	if err != nil {
 		return "", err
 	}
 	defer session.Close()
-	var buf bytes.Buffer
-	session.Stdout = &buf
-	session.Stderr = &buf
-	if err := session.Run(cmd); err != nil {
-		return buf.String(), fmt.Errorf("%w: %s", err, strings.TrimSpace(buf.String()))
+	var outBuf, errBuf bytes.Buffer
+	session.Stdout = &outBuf
+	if stdoutOnly {
+		session.Stderr = &errBuf
+	} else {
+		session.Stderr = &outBuf
 	}
-	return buf.String(), nil
+	if err := session.Start(cmd); err != nil {
+		return "", err
+	}
+	waitDone := make(chan error, 1)
+	go func() { waitDone <- session.Wait() }()
+	select {
+	case <-ctx.Done():
+		_ = session.Close()
+		return outBuf.String(), ctx.Err()
+	case err := <-waitDone:
+		combined := outBuf.String()
+		if err != nil {
+			detail := strings.TrimSpace(combined)
+			if detail == "" {
+				detail = strings.TrimSpace(errBuf.String())
+			}
+			if detail != "" {
+				return combined, fmt.Errorf("%w: %s", err, detail)
+			}
+			return combined, err
+		}
+		return combined, nil
+	}
 }
 
 func runSessionCombined(client *ssh.Client, cmd string) (stdout, stderr string, err error) {

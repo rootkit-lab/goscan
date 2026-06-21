@@ -43,10 +43,10 @@ if [ ! -f "$BIN" ]; then
 fi
 
 mkdir -p "$APP_DIR/bin" "$HOME/.local/bin"
-install -m 755 "$BIN" "$APP_DIR/bin/goscan"
+install -m 755 "$BIN" "$APP_DIR/bin/goscan-remote"
 if [ -f "$CACHE/$ARCH/VERSION" ]; then cp "$CACHE/$ARCH/VERSION" "$APP_DIR/VERSION"; fi
 if [ -f "$CACHE/$ARCH/BINHASH" ]; then cp "$CACHE/$ARCH/BINHASH" "$APP_DIR/BINHASH"; fi
-ln -sf "$APP_DIR/bin/goscan" "$HOME/.local/bin/goscan"
+ln -sf "$APP_DIR/bin/goscan-remote" "$HOME/.local/bin/goscan-remote"
 echo GOSCAN_WORKER_INSTALL_OK
 `
 

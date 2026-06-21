@@ -1,6 +1,7 @@
 package remoteworker
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"strings"
@@ -34,6 +35,8 @@ type ScanOptions struct {
 	HubConnected     *atomic.Bool
 	OnUploadProgress UploadProgress
 	OnScanProgress   func(scanned, vulns, total int64)
+	OnScanComplete   func(scanned, vulns, total int64)
+	OnPhase          func(label string, scanned, vulns, total int64)
 	OnFound          func(domain, path, url string)
 }
 
@@ -146,13 +149,23 @@ func runSSHBatch(ctx context.Context, client *ssh.Client, w Config, opts ScanOpt
 	)
 	onLog(fmt.Sprintf("a testar batch (%d threads, %d domínios)…", threads, opts.DomainCount))
 	var lastProgress int64
+	var lastVulns int64
+	var lastTotal int64
+	var usageDetected bool
 	hubActive := opts.HubConnected
 	if err := runSessionStream(ctx, client, scanCmd, func(line string) {
 		line = strings.TrimSpace(strings.TrimPrefix(line, "\r"))
 		if line == "" {
 			return
 		}
+		if remoteCLIUsageLine(line) {
+			usageDetected = true
+			return
+		}
 		if scanned, vulns, total, ok := parseProgressLine(line); ok {
+			lastProgress = scanned
+			lastVulns = vulns
+			lastTotal = total
 			if hubActive == nil || !hubActive.Load() {
 				if opts.OnScanProgress != nil {
 					opts.OnScanProgress(scanned, vulns, total)
@@ -187,19 +200,49 @@ func runSSHBatch(ctx context.Context, client *ssh.Client, w Config, opts ScanOpt
 	}); err != nil {
 		return nil, fmt.Errorf("scan remoto: %w", err)
 	}
+	if usageDetected {
+		return nil, fmt.Errorf("binário remoto incorrecto ou desactualizado (flags -hub/-batch-size) — activa «Forçar actualização do binário remoto» e repete")
+	}
+
+	scanned := lastProgress
+	vulns := lastVulns
+	total := lastTotal
+	if total <= 0 {
+		total = int64(opts.DomainCount)
+	}
+	if scanned <= 0 {
+		scanned = total
+	}
+	if opts.OnScanComplete != nil {
+		opts.OnScanComplete(scanned, vulns, total)
+	}
 
 	onLog("a devolver findings ao orchestrador…")
+	if opts.OnPhase != nil {
+		opts.OnPhase("export", scanned, vulns, total)
+	}
 	exportCmd := fmt.Sprintf(
 		`%s findings export-json -run-id %s -findings %s`,
 		shellQuote(goscanBin),
 		shellQuote(opts.RunID),
 		shellQuote(remoteFindings),
 	)
-	out, err := runSession(client, exportCmd)
+	exportCtx, exportCancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer exportCancel()
+	out, err := runSessionStdoutCtx(exportCtx, client, exportCmd)
 	if err != nil {
 		return nil, fmt.Errorf("export findings: %w", err)
 	}
-	return []byte(out), nil
+	raw := sanitizeExportPayload([]byte(out))
+	if len(raw) == 0 {
+		onLog("export remoto vazio (0 findings neste lote)")
+	}
+	return raw, nil
+}
+
+func sanitizeExportPayload(data []byte) []byte {
+	data = bytes.ReplaceAll(data, []byte{0}, nil)
+	return bytes.TrimSpace(data)
 }
 
 func cleanupRemote(client *ssh.Client, paths ...string) {
@@ -213,6 +256,25 @@ func boolFlag(name string, on bool) string {
 		return name
 	}
 	return ""
+}
+
+// remoteCLIUsageLine detects Go flag help when the wrong binary runs on the worker.
+func remoteCLIUsageLine(line string) bool {
+	if strings.HasPrefix(line, "Usage of ") ||
+		strings.Contains(line, "flag provided but not defined") {
+		return true
+	}
+	markers := []string{
+		"-batch-size", "-progress-json", "-hub ", "-hub-token",
+		"-timeout int", "Mostrar versão", "Workers de scan",
+		"Timeout HTTP", "Emitir linhas @goscan/progress",
+	}
+	for _, m := range markers {
+		if strings.Contains(line, m) {
+			return true
+		}
+	}
+	return false
 }
 
 func sanitizeRunID(id string) string {

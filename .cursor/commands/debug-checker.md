@@ -11,7 +11,7 @@ Testar ou corrigir **um** checker num `.env` concreto.
 ## Comandos
 
 ```bash
-cd /home/wiz/Projects/goscan
+cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 make scripts-venv
 
 # Batch (sem prompts, grava SUMMARY)

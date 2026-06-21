@@ -186,6 +186,27 @@ func Run(opts Options) error {
 					opts.OnFound(ev.WorkerID, ev.Domain, ev.Path, ev.URL, isNew)
 				}
 			},
+			OnDone: func(ev scanhub.DoneEvent) {
+				if opts.OnWorkerProgress == nil {
+					return
+				}
+				total := ev.Scanned
+				if total <= 0 {
+					return
+				}
+				status := "running"
+				label := "export"
+				if !ev.OK {
+					status = "failed"
+					label = ev.Error
+				}
+				opts.OnWorkerProgress(WorkerProgress{
+					WorkerID: ev.WorkerID, WorkerName: workerName(opts, ev.WorkerID),
+					DomainsScanned: ev.Scanned, VulnsFound: ev.Vulns,
+					DomainsTotal: total, Status: status, Running: ev.OK,
+					PhaseLabel: label,
+				})
+			},
 		})
 		if err != nil {
 			emitOut(opts, "Aviso: hub local indisponível — scan remoto usa fallback stderr")
@@ -525,6 +546,23 @@ func runRemoteJob(opts Options, hub *scanhub.Registry, sshSess *remoteworker.Wor
 			DomainsTotal: total, Status: "running", Running: true, PhaseLabel: label,
 		})
 	}
+	scanOpts.OnScanComplete = func(scanned, vulns, total int64) {
+		if hubConnected.Load() {
+			return
+		}
+		update(WorkerProgress{
+			WorkerID: workerID, WorkerName: name,
+			DomainsScanned: scanned, VulnsFound: vulns,
+			DomainsTotal: total, Status: "running", Running: true, PhaseLabel: "export",
+		})
+	}
+	scanOpts.OnPhase = func(label string, scanned, vulns, total int64) {
+		update(WorkerProgress{
+			WorkerID: workerID, WorkerName: name,
+			DomainsScanned: scanned, VulnsFound: vulns,
+			DomainsTotal: total, Status: "running", Running: true, PhaseLabel: label,
+		})
+	}
 	scanOpts.OnFound = func(domain, path, url string) {
 		if opts.OnFound != nil {
 			opts.OnFound(workerID, domain, path, url, true)
@@ -557,11 +595,16 @@ func runRemoteJob(opts Options, hub *scanhub.Registry, sshSess *remoteworker.Wor
 	log("a fundir findings na base local…")
 	imported, err := opts.Findings.ImportFindingsJSON(bytes.NewReader(raw), workerID, opts.RunID)
 	if err != nil {
-		log(fmt.Sprintf("erro a importar findings: %v", err))
-		update(WorkerProgress{WorkerID: workerID, WorkerName: name, Status: "failed", Error: err.Error()})
-		return fmt.Errorf("%s import: %w", name, err)
+		if hubConnected.Load() {
+			log(fmt.Sprintf("export reconciliado ignorado (hub activo, findings já recebidos): %v", err))
+		} else {
+			log(fmt.Sprintf("erro a importar findings: %v", err))
+			update(WorkerProgress{WorkerID: workerID, WorkerName: name, Status: "failed", Error: err.Error()})
+			return fmt.Errorf("%s import: %w", name, err)
+		}
+	} else {
+		log(fmt.Sprintf("export reconciliado: %d findings", imported))
 	}
-	log(fmt.Sprintf("export reconciliado: %d findings", imported))
 	return nil
 }
 

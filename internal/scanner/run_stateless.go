@@ -27,8 +27,39 @@ func (f *fileFindings) DomainFileName(domain, path string) string {
 	return remotefindings.DomainFileName(domain, path)
 }
 
+func statelessProgressTotal(cfg *Config, stats *Stats) int64 {
+	batchTotal := int64(cfg.BatchSize)
+	pending := atomic.LoadInt64(&stats.DomainsPending)
+	scanned := atomic.LoadInt64(&stats.DomainsScanned)
+	if pending > 0 {
+		if batchTotal <= 0 || pending < batchTotal {
+			return pending
+		}
+		return batchTotal
+	}
+	if scanned > 0 {
+		return scanned
+	}
+	if batchTotal > 0 {
+		return batchTotal
+	}
+	return pending
+}
+
+func finalizeStatelessProgress(cfg *Config, stats *Stats) {
+	scanned := atomic.LoadInt64(&stats.DomainsScanned)
+	vulns := atomic.LoadInt64(&stats.VulnsFound)
+	total := statelessProgressTotal(cfg, stats)
+	if cfg.HubProgress != nil {
+		cfg.HubProgress(scanned, vulns, total, 0)
+	}
+	if cfg.ProgressJSON && cfg.HubProgress == nil {
+		fmt.Fprintf(os.Stderr, "@goscan/progress scanned=%d vulns=%d total=%d\n", scanned, vulns, total)
+	}
+}
+
 // RunStateless scans a batch from text files without SQLite (remote workers).
-func RunStateless(ctx context.Context, cfg *Config) error {
+func RunStateless(ctx context.Context, cfg *Config) (Stats, error) {
 	log.SetOutput(io.Discard)
 	initHTTPClient(cfg.Timeout)
 
@@ -44,14 +75,14 @@ func RunStateless(ctx context.Context, cfg *Config) error {
 
 	fs, err := remotefindings.Open(findingsDir)
 	if err != nil {
-		return fmt.Errorf("findings: %w", err)
+		return Stats{}, fmt.Errorf("findings: %w", err)
 	}
 	activeFindings = &fileFindings{fs: fs}
 	currentCfg = cfg
 
 	files := findInputFiles(cfg.Dir)
 	if len(files) == 0 {
-		return fmt.Errorf("nenhum ficheiro de entrada (.txt ou .env)")
+		return Stats{}, fmt.Errorf("nenhum ficheiro de entrada (.txt ou .env)")
 	}
 
 	stats := &Stats{StartTime: time.Now()}
@@ -76,11 +107,9 @@ func RunStateless(ctx context.Context, cfg *Config) error {
 				case <-ticker.C:
 					scanned := atomic.LoadInt64(&stats.DomainsScanned)
 					vulns := atomic.LoadInt64(&stats.VulnsFound)
-					if batchTotal <= 0 {
-						batchTotal = atomic.LoadInt64(&stats.DomainsPending)
-					}
+					effectiveTotal := statelessProgressTotal(cfg, stats)
 					if cfg.ProgressJSON && cfg.HubProgress == nil {
-						fmt.Fprintf(os.Stderr, "@goscan/progress scanned=%d vulns=%d total=%d\n", scanned, vulns, batchTotal)
+						fmt.Fprintf(os.Stderr, "@goscan/progress scanned=%d vulns=%d total=%d\n", scanned, vulns, effectiveTotal)
 					}
 					if cfg.OnProgress != nil {
 						cfg.OnProgress(*stats)
@@ -93,7 +122,7 @@ func RunStateless(ctx context.Context, cfg *Config) error {
 								rate = int64(float64(scanned-lastScanned) / sec)
 							}
 						}
-						cfg.HubProgress(scanned, vulns, batchTotal, rate)
+						cfg.HubProgress(scanned, vulns, effectiveTotal, rate)
 						lastScanned = scanned
 						lastTick = time.Now()
 					}
@@ -103,10 +132,11 @@ func RunStateless(ctx context.Context, cfg *Config) error {
 	}
 
 	runStatelessScan(ctx, files, cfg, stats)
+	finalizeStatelessProgress(cfg, stats)
 	if err := ctx.Err(); err != nil {
-		return err
+		return *stats, err
 	}
-	return nil
+	return *stats, nil
 }
 
 func runStatelessScan(ctx context.Context, files []string, cfg *Config, stats *Stats) {

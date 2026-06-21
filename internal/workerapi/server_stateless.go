@@ -121,7 +121,12 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 				s.mu.Unlock()
 			},
 		}
-		_ = scanner.RunStateless(ctx, cfg)
+		stats, err := scanner.RunStateless(ctx, cfg)
+		if err == nil {
+			s.mu.Lock()
+			s.stats = stats
+			s.mu.Unlock()
+		}
 	}()
 
 	w.WriteHeader(http.StatusAccepted)

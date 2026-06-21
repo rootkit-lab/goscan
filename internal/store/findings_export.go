@@ -1,10 +1,12 @@
 package store
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
-	"strings"
 )
 
 // FindingExport is a portable finding record for remote merge.
@@ -52,19 +54,27 @@ func (fs *FindingsStore) ExportFindingsJSON(w interface{ Write([]byte) (int, err
 
 // ImportFindingsJSON merges NDJSON exports into the local master store.
 func (fs *FindingsStore) ImportFindingsJSON(r io.Reader, workerID, masterRunID string) (int, error) {
-	data, err := readAll(r)
+	data, err := io.ReadAll(r)
 	if err != nil {
 		return 0, err
 	}
+	data = sanitizeNDJSONExport(data)
+	if len(data) == 0 {
+		return 0, nil
+	}
+
 	imported := 0
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
+	sc := bufio.NewScanner(bytes.NewReader(data))
+	buf := make([]byte, 0, 256*1024)
+	sc.Buffer(buf, 4*1024*1024)
+	for sc.Scan() {
+		line := bytes.TrimSpace(sc.Bytes())
+		if len(line) == 0 || line[0] != '{' {
 			continue
 		}
 		var f FindingExport
-		if err := json.Unmarshal([]byte(line), &f); err != nil {
-			return imported, err
+		if err := json.Unmarshal(line, &f); err != nil {
+			return imported, fmt.Errorf("linha NDJSON inválida (importadas %d): %w", imported, err)
 		}
 		if workerID != "" && f.WorkerID == "" {
 			f.WorkerID = workerID
@@ -81,11 +91,15 @@ func (fs *FindingsStore) ImportFindingsJSON(r io.Reader, workerID, masterRunID s
 		}
 		imported++
 	}
+	if err := sc.Err(); err != nil {
+		return imported, err
+	}
 	return imported, nil
 }
 
-func readAll(r io.Reader) ([]byte, error) {
-	return io.ReadAll(r)
+func sanitizeNDJSONExport(data []byte) []byte {
+	data = bytes.ReplaceAll(data, []byte{0}, nil)
+	return bytes.TrimSpace(data)
 }
 
 // ExportFindingsJSONFile writes to path.

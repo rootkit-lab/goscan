@@ -5,7 +5,7 @@ Snapshot rápido para orientar a próxima acção de dev.
 ## Recolher (correr em paralelo)
 
 ```bash
-cd /home/wiz/Projects/goscan
+cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 git status -sb
 git log -3 --oneline
 ss -ltn 2>/dev/null | grep -E '9280|9282' || true

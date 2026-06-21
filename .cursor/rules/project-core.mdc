@@ -6,7 +6,7 @@ alwaysApply: true
 
 # goscan — core
 
-- Dados sensíveis em `var/`, `dominios.db`, `**/*.env` — **nunca commitar**
+- Dados sensíveis em `var/`, `dominios.db`, `files/`, `**/*.env` — **nunca commitar**
 - Findings unificados em `var/findings/by-domain/`
 - Scripts checker em `scripts/` com contrato `--env PATH`
 - CLI: `go run ./cmd/goscan` ou `make scan`

@@ -16,7 +16,7 @@
 
 ## Dados sensíveis
 
-Nunca versionar: `var/`, `dominios.db`, `**/*.env`, `files/dominios_unicos.txt`.
+Nunca versionar: `var/`, `dominios.db`, `**/*.env`, `files/`.
 
 ## Tasks
 

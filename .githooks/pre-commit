@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-blocked='(dominios\.db|\.env$|var/findings/)'
+blocked='(dominios\.db|\.env$|var/|^files/|settings\.yaml|\.(pem|ppk)$|id_rsa|id_ed25519)'
 if git diff --cached --name-only | grep -E "$blocked" >/dev/null 2>&1; then
   echo "Erro: ficheiros sensíveis no staging (db/env/findings)."
   git diff --cached --name-only | grep -E "$blocked" || true

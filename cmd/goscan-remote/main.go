@@ -109,15 +109,20 @@ func runScanCLI() {
 		}
 	}
 
-	if err := scanner.RunStateless(ctx, cfg); err != nil {
+	stats, err := scanner.RunStateless(ctx, cfg)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "❌ %v\n", err)
 		if hubClient != nil {
-			_ = hubClient.SendDone(context.Background(), 0, 0, false, err.Error())
+			_ = hubClient.SendDone(context.Background(), stats.DomainsScanned, stats.VulnsFound, false, err.Error())
 		}
 		os.Exit(1)
 	}
 	if hubClient != nil {
-		_ = hubClient.SendDone(context.Background(), int64(*batchSize), 0, true, "")
+		total := stats.DomainsScanned
+		if total <= 0 {
+			total = int64(*batchSize)
+		}
+		_ = hubClient.SendDone(context.Background(), total, stats.VulnsFound, true, "")
 	}
 }
 

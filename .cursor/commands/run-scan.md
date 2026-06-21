@@ -5,7 +5,7 @@ Escanear domínios e gravar findings.
 ## CLI
 
 ```bash
-cd /home/wiz/Projects/goscan
+cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 make scan
 # ou com opções:
 make build

@@ -24,7 +24,14 @@ temp/
 .env.*
 *.local
 config.yml
+settings.yaml
 .cursor/dev-credentials.env
+*.pem
+*.ppk
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
 
 # Data (sensitive / large)
 var/
@@ -32,13 +39,14 @@ scan_resultados_*/
 dominios.db
 dominios.db-*
 test_dominios.db
-files/dominios_unicos.txt
+files/
 **/*.env
 
 # Go build
 /bin/
 /out/
 /goscan-ui
+/dist/
 /dist/worker-release/
 
 # Node / frontend

@@ -41,7 +41,7 @@ func fileSHA256(path string) (string, error) {
 }
 
 func remoteAppBin(home string) string {
-	return filepath.ToSlash(filepath.Join(home, remoteAppDir, "bin", "goscan"))
+	return filepath.ToSlash(filepath.Join(home, remoteAppDir, "bin", "goscan-remote"))
 }
 
 func remoteBinUpToDateSFTP(client *sftp.Client, home, localVer string, localSize int64, localHash string) (bool, string) {
@@ -69,7 +69,7 @@ func remoteBinUpToDateSFTP(client *sftp.Client, home, localVer string, localSize
 }
 
 func remoteBinLink(home string) string {
-	return filepath.ToSlash(filepath.Join(home, ".local", "bin", "goscan"))
+	return filepath.ToSlash(filepath.Join(home, ".local", "bin", "goscan-remote"))
 }
 
 // EnsureInstalled guarantees goscan exists on the remote host.
@@ -256,29 +256,26 @@ func remoteExecutable(client *ssh.Client, binPath string) bool {
 }
 
 func resolveDeployArtifacts(appRoot, version string) (binPath, ver string, size int64, err error) {
-	for _, name := range []string{"goscan-remote", "goscan"} {
-		candidate := filepath.Join(appRoot, "bin", name)
-		st, statErr := os.Stat(candidate)
-		if statErr != nil || st.IsDir() {
-			continue
-		}
-		binPath = candidate
-		size = st.Size()
-		ver = strings.TrimSpace(version)
-		if ver == "" {
-			if b, e := os.ReadFile(filepath.Join(appRoot, "assets", "VERSION")); e == nil {
-				ver = strings.TrimSpace(string(b))
-			}
-		}
-		key := ver + ":" + binPath + ":" + fmt.Sprintf("%d:%d", st.Size(), st.ModTime().Unix())
-		deployBinCache.mu.Lock()
-		deployBinCache.key = key
-		deployBinCache.binPath = binPath
-		deployBinCache.binSize = size
-		deployBinCache.mu.Unlock()
-		return binPath, ver, size, nil
+	candidate := filepath.Join(appRoot, "bin", "goscan-remote")
+	st, statErr := os.Stat(candidate)
+	if statErr != nil || st.IsDir() {
+		return "", "", 0, fmt.Errorf("bin/goscan-remote em falta em %s — corre make release && make install", appRoot)
 	}
-	return "", "", 0, fmt.Errorf("bin/goscan-remote em falta — corre make build")
+	binPath = candidate
+	size = st.Size()
+	ver = strings.TrimSpace(version)
+	if ver == "" {
+		if b, e := os.ReadFile(filepath.Join(appRoot, "assets", "VERSION")); e == nil {
+			ver = strings.TrimSpace(string(b))
+		}
+	}
+	key := ver + ":" + binPath + ":" + fmt.Sprintf("%d:%d", st.Size(), st.ModTime().Unix())
+	deployBinCache.mu.Lock()
+	deployBinCache.key = key
+	deployBinCache.binPath = binPath
+	deployBinCache.binSize = size
+	deployBinCache.mu.Unlock()
+	return binPath, ver, size, nil
 }
 
 func readRemoteText(client *sftp.Client, path string) string {

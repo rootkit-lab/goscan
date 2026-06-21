@@ -14,6 +14,7 @@ die() { echo "install: $*" >&2; exit 1; }
 
 [ -x "$ROOT/bin/goscan" ] || die "bin/goscan em falta — corre make release primeiro"
 [ -x "$ROOT/bin/goscan-ui" ] || die "bin/goscan-ui em falta — corre make release primeiro"
+[ -x "$ROOT/bin/goscan-remote" ] || die "bin/goscan-remote em falta — corre make release primeiro"
 [ -f "$ROOT/scripts/registry.yaml" ] || die "scripts/registry.yaml em falta"
 
 # Ícone PNG
@@ -27,6 +28,7 @@ mkdir -p "$APP_DIR/bin" "$APP_DIR/scripts" "$DATA_DIR/var/findings" "$DATA_DIR/v
 
 install -m 755 "$ROOT/bin/goscan" "$APP_DIR/bin/goscan"
 install -m 755 "$ROOT/bin/goscan-ui" "$APP_DIR/bin/goscan-ui"
+install -m 755 "$ROOT/bin/goscan-remote" "$APP_DIR/bin/goscan-remote"
 
 # Scripts (sem .venv do dev)
 rsync -a --delete \
