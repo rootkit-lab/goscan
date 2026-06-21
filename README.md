@@ -24,7 +24,7 @@ Scanner de ficheiros `.env` expostos via HTTP, com UI desktop (Wails + React), c
 ## Instalação rápida (dev)
 
 ```bash
-git clone https://github.com/USER/goscan.git
+git clone https://github.com/rootkit-lab/goscan.git
 cd goscan
 
 make scripts-venv
@@ -85,7 +85,7 @@ scripts/             Checkers Python + registry.yaml
 1. Publicar `goscan-remote` num repositório **privado** de releases:
 
    ```bash
-   export WORKER_RELEASE_REMOTE=git@github.com:USER/goscan-worker-releases.git
+   export WORKER_RELEASE_REMOTE=git@github.com:rootkit-lab/goscan-worker-releases.git
    make publish-worker
    ```
 
