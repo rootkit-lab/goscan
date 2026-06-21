@@ -5,7 +5,7 @@
   <Product
     Id="*"
     Name="GoScan"
-    Language="1046"
+    Language="1033"
     Version="$(var.ProductVersion)"
     Manufacturer="rootkit-lab"
     UpgradeCode="$(var.UpgradeCode)">
@@ -13,11 +13,11 @@
       InstallerVersion="500"
       Compressed="yes"
       InstallScope="perMachine"
-      Description="GoScan — findings e scan de .env"
+      Description="GoScan - findings and .env scan"
       Comments="https://github.com/rootkit-lab/goscan" />
 
     <MajorUpgrade
-      DowngradeErrorMessage="Uma versão mais recente do GoScan já está instalada."
+      DowngradeErrorMessage="A newer version of GoScan is already installed."
       AllowSameVersionUpgrades="yes" />
     <MediaTemplate EmbedCab="yes" />
 
@@ -45,7 +45,7 @@
       <Shortcut
         Id="GoScanUIShortcut"
         Name="GoScan"
-        Description="Findings, checkers e scan de .env"
+        Description="Findings, checkers and .env scan"
         Target="[APPDIR]bin\goscan-ui.exe"
         WorkingDirectory="APPDIR" />
       <RemoveFolder Id="RemoveApplicationProgramsFolder" Directory="ApplicationProgramsFolder" On="uninstall" />
