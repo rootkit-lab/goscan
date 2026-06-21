@@ -119,7 +119,7 @@ jobs:
   github-release:
     name: GitHub Release
     needs: [build-deb, build-msi]
-    if: ${{ needs.build-deb.result == 'success' }}
+    if: ${{ always() && needs.build-deb.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
